@@ -4,6 +4,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 interface SupabaseUser {
   id: string;
   email: string;
+  name?: string;
+  avatar?: string;
 }
 
 @Injectable()
@@ -20,13 +22,14 @@ export class AuthService {
       return existing;
     }
 
-    // 닉네임 임시값: 이메일의 @ 앞부분
-    const tempNickname = user.email.split('@')[0];
+    // 닉네임: 구글 이름이 있으면 사용, 없으면 이메일의 @ 앞부분
+    const nickname = user.name ?? user.email.split('@')[0];
 
     return this.prisma.profiles.create({
       data: {
         id: user.id,
-        nickname: tempNickname,
+        nickname,
+        profile_image: user.avatar,
       },
     });
   }
