@@ -21,11 +21,17 @@ export class SupabaseStrategy extends PassportStrategy(Strategy, 'supabase') {
     });
   }
 
-  validate(payload: { sub?: string; email: string }) {
+  validate(payload: {
+    sub?: string;
+    email: string;
+    user_metadata?: { full_name?: string; avatar_url?: string };
+  }) {
     if (!payload.sub) throw new UnauthorizedException();
     return {
       id: payload.sub,
       email: payload.email,
+      name: payload.user_metadata?.full_name, // 구글 이름
+      avatar: payload.user_metadata?.avatar_url, // 구글 프로필 사진
     };
   }
 }
