@@ -1,34 +1,83 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  NotFoundException,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { GroupsService } from './groups.service';
 import { CreateGroupDto } from './dto/create-group.dto';
-import { UpdateGroupDto } from './dto/update-group.dto';
+import { JoinGroupDto } from './dto/join-group.dto';
+import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
+@ApiTags('groups')
+@ApiBearerAuth()
 @Controller('groups')
+@UseGuards(SupabaseAuthGuard)
 export class GroupsController {
   constructor(private readonly groupsService: GroupsService) {}
 
+  // 그룹 생성
   @Post()
-  create(@Body() createGroupDto: CreateGroupDto) {
-    return this.groupsService.create(createGroupDto);
+  @ApiOperation({ summary: '그룹 생성' })
+  create(
+    @CurrentUser() user: { id: string; email: string },
+    @Body() createGroupDto: CreateGroupDto,
+  ) {
+    return this.groupsService.create(user.id, createGroupDto);
   }
 
+  // 초대 코드로 그룹 참여
+  @Post('join')
+  @ApiOperation({ summary: '초대 코드로 그룹 참여' })
+  join(
+    @CurrentUser() user: { id: string; email: string },
+    @Body() joinGroupDto: JoinGroupDto,
+  ) {
+    return this.groupsService.join(user.id, joinGroupDto);
+  }
+
+  // 내 그룹 목록 조회
   @Get()
-  findAll() {
-    return this.groupsService.findAll();
+  @ApiOperation({ summary: '내 그룹 목록 조회' })
+  findMyGroups(@CurrentUser() user: { id: string; email: string }) {
+    return this.groupsService.findMyGroups(user.id);
   }
 
+  // 그룹 상세 조회 (멤버만 가능)
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.groupsService.findOne(+id);
+  @ApiOperation({ summary: '그룹 상세 조회' })
+  findOne(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+  ) {
+    return this.groupsService.findOne(user.id, this.toBigIntId(id));
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateGroupDto: UpdateGroupDto) {
-    return this.groupsService.update(+id, updateGroupDto);
+  // 그룹 탈퇴
+  @Delete(':id/members/me')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: '그룹 탈퇴' })
+  leave(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+  ) {
+    return this.groupsService.leave(user.id, this.toBigIntId(id));
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.groupsService.remove(+id);
+  // 라우트 파라미터(string)를 BigInt로 변환, 숫자가 아니면 404로 처리
+  private toBigIntId(id: string): bigint {
+    try {
+      return BigInt(id);
+    } catch {
+      throw new NotFoundException('그룹을 찾을 수 없습니다.');
+    }
   }
 }
