@@ -64,6 +64,7 @@ export class RecordsController {
       new ParseFilePipeBuilder()
         .addFileTypeValidator({
           fileType: /^(image\/jpeg|image\/png|image\/webp)$/,
+          fallbackToMimetype: true,
         })
         .addMaxSizeValidator({ maxSize: RECORD_IMAGE_MAX_SIZE_BYTES })
         .build({ errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY }),

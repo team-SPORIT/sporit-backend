@@ -72,6 +72,7 @@ export class ProfilesController {
       new ParseFilePipeBuilder()
         .addFileTypeValidator({
           fileType: /^(image\/jpeg|image\/png|image\/webp)$/,
+          fallbackToMimetype: true,
         })
         .addMaxSizeValidator({ maxSize: AVATAR_MAX_SIZE_BYTES })
         .build({ errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY }),
