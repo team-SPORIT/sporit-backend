@@ -11,7 +11,13 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ProfilesService } from './profiles.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
@@ -45,12 +51,28 @@ export class ProfilesController {
   // 프로필 이미지 업로드 - multipart/form-data, 필드명 'file'
   @Post('me/avatar')
   @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: '프로필 이미지 업로드' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: '프로필 이미지',
+        },
+      },
+    },
+  })
   uploadAvatar(
     @CurrentUser() user: { id: string; email: string },
     @UploadedFile(
       new ParseFilePipeBuilder()
-        .addFileTypeValidator({ fileType: /^(image\/jpeg|image\/png|image\/webp)$/ })
+        .addFileTypeValidator({
+          fileType: /^(image\/jpeg|image\/png|image\/webp)$/,
+        })
         .addMaxSizeValidator({ maxSize: AVATAR_MAX_SIZE_BYTES })
         .build({ errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY }),
     )

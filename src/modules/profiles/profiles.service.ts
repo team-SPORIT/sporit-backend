@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../common/supabase/supabase.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -35,7 +39,9 @@ export class ProfilesService {
 
   // 프로필 이미지 업로드 - 서버가 파일을 받아 Storage에 올리고, publicUrl을 profile_image에 저장까지 처리
   async uploadAvatar(userId: string, file: Express.Multer.File) {
-    const storage = this.supabase.getClient().storage.from(PROFILE_IMAGES_BUCKET);
+    const storage = this.supabase
+      .getClient()
+      .storage.from(PROFILE_IMAGES_BUCKET);
 
     // 새 이미지를 올리기 전에 기존 이미지가 있으면 삭제 (orphan 파일 누적 방지)
     const current = await this.prisma.profiles.findUnique({

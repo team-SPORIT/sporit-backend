@@ -4,11 +4,10 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
-// BigInt는 기본적으로 JSON 직렬화가 안 되므로, 응답 시 문자열로 자동 변환되게 전역 설정
-type BigIntWithToJSON = typeof BigInt.prototype & { toJSON(): string };
-(BigInt.prototype as BigIntWithToJSON).toJSON = function (
+// BigInt를 JSON 응답에서 문자열로 자동 변환 (서비스/컨트롤러에서 별도 직렬화 불필요)
+(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function (
   this: bigint,
-): string {
+) {
   return this.toString();
 };
 
@@ -28,4 +27,4 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+void bootstrap();
