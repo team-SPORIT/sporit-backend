@@ -8,8 +8,14 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  getKstToday,
+  kstDateToUtcRange,
+  parseKstDate,
+} from '../../common/utils/kst-date.util';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
+import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
 
 const INVITE_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const INVITE_CODE_LENGTH = 8;
@@ -101,6 +107,86 @@ export class GroupsService {
         },
       },
     });
+  }
+
+  // 그룹 피드 조회 (멤버만 가능): 내가 해당 날짜에 이 그룹에 공유하지 않았으면 잠금 처리
+  async getFeed(
+    userId: string,
+    groupId: bigint,
+    dateStr?: string,
+  ): Promise<GroupFeedResponseDto> {
+    const membership = await this.prisma.group_members.findUnique({
+      where: { group_id_user_id: { group_id: groupId, user_id: userId } },
+    });
+    if (!membership) {
+      throw new ForbiddenException('그룹 멤버만 조회할 수 있습니다.');
+    }
+
+    const date = dateStr ? parseKstDate(dateStr) : getKstToday();
+    if (!date) {
+      throw new BadRequestException('date는 YYYY-MM-DD 형식이어야 합니다.');
+    }
+    const { start, end } = kstDateToUtcRange(date);
+
+    const isUnlocked = await this.isUnlockedFor(userId, groupId, start, end);
+    if (!isUnlocked) {
+      return { locked: true, records: [] };
+    }
+
+    const shares = await this.prisma.record_shares.findMany({
+      where: { group_id: groupId, shared_at: { gte: start, lt: end } },
+      include: {
+        records: {
+          include: {
+            profiles: {
+              select: { id: true, nickname: true, profile_image: true },
+            },
+          },
+        },
+        _count: { select: { record_reactions: true, record_comments: true } },
+      },
+      orderBy: { shared_at: 'asc' },
+    });
+
+    return {
+      locked: false,
+      records: shares.map((share) => ({
+        shareId: share.id,
+        recordId: share.record_id,
+        exerciseType: share.records.exercise_type,
+        durationMin: share.records.duration_min,
+        calories: share.records.calories,
+        comment: share.records.comment,
+        photoUrl: share.records.photo_url,
+        recordDate: share.records.record_date,
+        sharedAt: share.shared_at,
+        author: {
+          id: share.records.profiles.id,
+          nickname: share.records.profiles.nickname,
+          profileImage: share.records.profiles.profile_image,
+        },
+        reactionCount: share._count.record_reactions,
+        commentCount: share._count.record_comments,
+      })),
+    };
+  }
+
+  // 내가 해당 그룹에 [start, end) 시간 범위로 공유한 기록이 있는지 (잠금 판단용)
+  private async isUnlockedFor(
+    userId: string,
+    groupId: bigint,
+    start: Date,
+    end: Date,
+  ): Promise<boolean> {
+    const myShare = await this.prisma.record_shares.findFirst({
+      where: {
+        group_id: groupId,
+        shared_at: { gte: start, lt: end },
+        records: { user_id: userId },
+      },
+      select: { id: true },
+    });
+    return !!myShare;
   }
 
   // 그룹 탈퇴
