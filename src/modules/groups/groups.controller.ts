@@ -8,12 +8,19 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { GroupsService } from './groups.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
+import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -59,6 +66,23 @@ export class GroupsController {
     @Param('id') id: string,
   ) {
     return this.groupsService.findOne(user.id, this.toBigIntId(id));
+  }
+
+  // 그룹 피드 조회 (멤버만, 오늘 공유 전이면 잠금)
+  @Get(':id/feed')
+  @ApiOperation({ summary: '그룹 피드 조회' })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    example: '2026-08-13',
+    description: '조회할 날짜(KST, YYYY-MM-DD). 생략 시 오늘',
+  })
+  getFeed(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+    @Query('date') date?: string,
+  ): Promise<GroupFeedResponseDto> {
+    return this.groupsService.getFeed(user.id, this.toBigIntId(id), date);
   }
 
   // 그룹 탈퇴

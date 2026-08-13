@@ -24,3 +24,24 @@ export function subtractDays(date: Date, days: number): Date {
 export function isSameDate(a: Date, b: Date): boolean {
   return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
 }
+
+// "YYYY-MM-DD" 쿼리 문자열을 getKstToday()와 같은 형태(KST 날짜, UTC 자정 값)로 파싱. 형식이 잘못되면 null
+export function parseKstDate(dateStr: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!match) return null;
+
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  const isValid =
+    date.getUTCFullYear() === Number(year) &&
+    date.getUTCMonth() === Number(month) - 1 &&
+    date.getUTCDate() === Number(day);
+
+  return isValid ? date : null;
+}
+
+// getKstToday() 형태의 KST 날짜를 실제 UTC 타임스탬프 범위([start, end))로 변환 (timestamptz 컬럼을 KST 날짜로 조회할 때 사용)
+export function kstDateToUtcRange(kstDate: Date): { start: Date; end: Date } {
+  const start = new Date(kstDate.getTime() - KST_OFFSET_MS);
+  return { start, end: new Date(start.getTime() + DAY_MS) };
+}
