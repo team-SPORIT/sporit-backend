@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   getKstToday,
   isSameDate,
+  kstDateToUtcRange,
   subtractDays,
 } from '../../common/utils/kst-date.util';
 import { CreateShareDto } from './dto/create-share.dto';
@@ -53,7 +54,7 @@ export class SharesService {
         data: { record_id: recordId, group_id: groupId },
       });
 
-      await this.updateGroupStreak(tx, userId, groupId, today);
+      await this.updateGroupStreak(tx, groupId, today);
 
       return share;
     });
@@ -76,36 +77,55 @@ export class SharesService {
     await this.prisma.record_shares.delete({ where: { id: shareId } });
   }
 
-  // 그룹 스트릭 갱신: 오늘 이미 공유했으면 유지, 어제 공유가 있었으면 +1, 그 외면 1로 초기화
+  // 그룹 전체 스트릭 갱신: 오늘 그룹의 "가입 당일이 아닌" 멤버 전원이 공유했으면 그룹 스트릭 +1(또는 1로 리셋)
+  // 이미 오늘자로 갱신했으면 재갱신하지 않음(하루 한 번만)
   private async updateGroupStreak(
     tx: Prisma.TransactionClient,
-    userId: string,
     groupId: bigint,
     today: Date,
   ) {
-    const member = await tx.group_members.findUniqueOrThrow({
-      where: { group_id_user_id: { group_id: groupId, user_id: userId } },
-      select: { current_streak: true, last_shared_date: true },
+    const group = await tx.groups.findUniqueOrThrow({
+      where: { id: groupId },
+      select: { current_streak: true, last_all_shared_date: true },
     });
 
-    const { last_shared_date: lastSharedDate, current_streak: currentStreak } =
-      member;
-
-    let nextStreak: number;
-    if (lastSharedDate && isSameDate(lastSharedDate, today)) {
-      nextStreak = currentStreak;
-    } else if (
-      lastSharedDate &&
-      isSameDate(lastSharedDate, subtractDays(today, 1))
+    if (
+      group.last_all_shared_date &&
+      isSameDate(group.last_all_shared_date, today)
     ) {
-      nextStreak = currentStreak + 1;
-    } else {
-      nextStreak = 1;
+      return;
     }
 
-    await tx.group_members.update({
-      where: { group_id_user_id: { group_id: groupId, user_id: userId } },
-      data: { current_streak: nextStreak, last_shared_date: today },
+    const { start, end } = kstDateToUtcRange(today);
+
+    // 오늘 가입한 멤버는 "전원 판정" 분모에서 제외
+    const targetMemberCount = await tx.group_members.count({
+      where: { group_id: groupId, joined_at: { lt: start } },
+    });
+
+    // 오늘 이 그룹에 공유한 서로 다른 유저 수 (record_shares에는 user_id가 없으므로 records와 join)
+    const sharedUsers = await tx.record_shares.findMany({
+      where: { group_id: groupId, shared_at: { gte: start, lt: end } },
+      select: { records: { select: { user_id: true } } },
+    });
+    const sharedUserCount = new Set(
+      sharedUsers.map((share) => share.records.user_id),
+    ).size;
+
+    const isAllShared = sharedUserCount >= targetMemberCount;
+    if (!isAllShared) {
+      return;
+    }
+
+    const nextStreak =
+      group.last_all_shared_date &&
+      isSameDate(group.last_all_shared_date, subtractDays(today, 1))
+        ? group.current_streak + 1
+        : 1;
+
+    await tx.groups.update({
+      where: { id: groupId },
+      data: { current_streak: nextStreak, last_all_shared_date: today },
     });
   }
 }
