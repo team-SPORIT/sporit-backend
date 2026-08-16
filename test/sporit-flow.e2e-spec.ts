@@ -5,10 +5,16 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp } from './helpers/app.helper';
 import { createTestUser, getAccessToken } from './helpers/auth.helper';
-import { cleanupTestData, disconnectPrisma } from './helpers/cleanup.helper';
+import {
+  cleanupTestData,
+  disconnectPrisma,
+  prisma,
+} from './helpers/cleanup.helper';
 
 const TEST_IMAGE_PATH = path.join(__dirname, 'fixtures', 'test-image.png');
 const runId = Date.now();
+// 그룹 가입 당일 제외 정책을 검증하려면 "어제 가입"을 흉내내야 하므로, 실제 시각보다 이틀 전으로 백데이트한다
+const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 
 interface ProfileResponse {
   id: string;
@@ -18,16 +24,12 @@ interface ProfileResponse {
 interface GroupResponse {
   id: string;
   invite_code: string;
-}
-
-interface GroupMember {
-  user_id: string;
   current_streak: number;
 }
 
 interface GroupDetailResponse {
   id: string;
-  group_members: GroupMember[];
+  current_streak: number;
 }
 
 interface RecordResponse {
@@ -124,6 +126,14 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .expect(201);
 
     expect((res.body as GroupResponse).id).toBe(groupId);
+
+    // 그룹 전체 스트릭의 "가입 당일 제외" 정책 때문에, 오늘 막 가입한 A/B를 기준으로는
+    // 전원 공유 판정이 항상 자명하게 참이 되어 부분 공유(0 유지) 케이스를 검증할 수 없다.
+    // 두 멤버가 어제 가입한 것처럼 백데이트해 실제 시나리오(기존 멤버)를 재현한다.
+    await prisma.group_members.updateMany({
+      where: { group_id: BigInt(groupId) },
+      data: { joined_at: new Date(Date.now() - TWO_DAYS_MS) },
+    });
   });
 
   it('4. A가 GET /groups/:id/feed 하면 아직 공유 전이라 잠겨 있다', async () => {
@@ -141,7 +151,6 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .set('Authorization', `Bearer ${tokenA}`)
       .field('exerciseType', '러닝')
       .field('durationMin', '30')
-      .field('calories', '250')
       .attach('file', TEST_IMAGE_PATH)
       .expect(201);
 
@@ -157,7 +166,7 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     expect((profileRes.body as ProfileResponse).current_streak).toBe(1);
   });
 
-  it('6. A가 POST /shares로 기록을 그룹에 공유하면 그룹 스트릭이 1이 된다', async () => {
+  it('6. A만 POST /shares로 공유하면 B가 아직 공유 전이라 그룹 스트릭은 0으로 유지된다', async () => {
     await request(app.getHttpServer())
       .post('/shares')
       .set('Authorization', `Bearer ${tokenA}`)
@@ -169,14 +178,34 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .set('Authorization', `Bearer ${tokenA}`)
       .expect(200);
 
-    const memberA = (groupRes.body as GroupDetailResponse).group_members.find(
-      (member) => member.user_id === userAId,
-    );
-
-    expect(memberA?.current_streak).toBe(1);
+    expect((groupRes.body as GroupDetailResponse).current_streak).toBe(0);
   });
 
-  it('7. A가 GET /groups/:id/feed 하면 잠금이 풀리고 본인 기록이 보인다', async () => {
+  it('7. B도 기록을 작성해 공유하면 전원 공유로 그룹 스트릭이 1이 된다', async () => {
+    const recordRes = await request(app.getHttpServer())
+      .post('/records')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .field('exerciseType', '요가')
+      .field('durationMin', '20')
+      .attach('file', TEST_IMAGE_PATH)
+      .expect(201);
+    const recordIdB = (recordRes.body as RecordResponse).id;
+
+    await request(app.getHttpServer())
+      .post('/shares')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ recordId: recordIdB, groupId })
+      .expect(201);
+
+    const groupRes = await request(app.getHttpServer())
+      .get(`/groups/${groupId}`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .expect(200);
+
+    expect((groupRes.body as GroupDetailResponse).current_streak).toBe(1);
+  });
+
+  it('8. A가 GET /groups/:id/feed 하면 잠금이 풀리고 본인 기록이 보인다', async () => {
     const res = await request(app.getHttpServer())
       .get(`/groups/${groupId}/feed`)
       .set('Authorization', `Bearer ${tokenA}`)
@@ -184,16 +213,133 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
 
     const body = res.body as FeedResponse;
     expect(body.locked).toBe(false);
-    expect(body.records).toHaveLength(1);
-    expect(body.records[0].author.id).toBe(userAId);
+    expect(body.records).toHaveLength(2);
+    expect(body.records.map((record) => record.author.id)).toContain(userAId);
+  });
+});
+
+// 그룹 전체 스트릭의 "가입 당일 제외" 정책만 별도로 검증: 오늘 막 가입한 멤버는
+// 전원 공유 판정의 분모에서 빠지므로, 기존 멤버끼리만 공유해도 그룹 스트릭이 오른다
+describe('그룹 전체 스트릭 - 가입 당일 멤버 제외 (e2e)', () => {
+  let app: INestApplication<App>;
+
+  const userA = {
+    email: `sporit-e2e-exclusion-a-${runId}@example.com`,
+    password: 'Test1234!',
+  };
+  const userB = {
+    email: `sporit-e2e-exclusion-b-${runId}@example.com`,
+    password: 'Test1234!',
+  };
+  const userC = {
+    email: `sporit-e2e-exclusion-c-${runId}@example.com`,
+    password: 'Test1234!',
+  };
+
+  let userAId: string;
+  let userBId: string;
+  let userCId: string;
+  let tokenA: string;
+  let tokenB: string;
+  let tokenC: string;
+
+  let groupId: string;
+
+  beforeAll(async () => {
+    app = await createTestApp();
+
+    const createdA = await createTestUser(userA.email, userA.password);
+    const createdB = await createTestUser(userB.email, userB.password);
+    const createdC = await createTestUser(userC.email, userC.password);
+    userAId = createdA.id;
+    userBId = createdB.id;
+    userCId = createdC.id;
+
+    tokenA = await getAccessToken(userA.email, userA.password);
+    tokenB = await getAccessToken(userB.email, userB.password);
+    tokenC = await getAccessToken(userC.email, userC.password);
+
+    await request(app.getHttpServer())
+      .post('/auth/sync')
+      .set('Authorization', `Bearer ${tokenA}`);
+    await request(app.getHttpServer())
+      .post('/auth/sync')
+      .set('Authorization', `Bearer ${tokenB}`);
+    await request(app.getHttpServer())
+      .post('/auth/sync')
+      .set('Authorization', `Bearer ${tokenC}`);
   });
 
-  it('8. B가 GET /groups/:id/feed 하면 본인은 아직 공유 전이라 잠겨 있다', async () => {
-    const res = await request(app.getHttpServer())
-      .get(`/groups/${groupId}/feed`)
+  afterAll(async () => {
+    await app.close();
+    await cleanupTestData({
+      userIds: [userAId, userBId, userCId],
+      groupIds: groupId ? [BigInt(groupId)] : [],
+    });
+    await disconnectPrisma();
+  });
+
+  it('오늘 막 가입한 C는 전원 판정에서 제외되어, A/B만 공유해도 그룹 스트릭이 1이 된다', async () => {
+    const groupRes = await request(app.getHttpServer())
+      .post('/groups')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: `E2E 제외정책 그룹 ${runId}` })
+      .expect(201);
+    const group = groupRes.body as GroupResponse;
+    groupId = group.id;
+
+    await request(app.getHttpServer())
+      .post('/groups/join')
       .set('Authorization', `Bearer ${tokenB}`)
+      .send({ code: group.invite_code })
+      .expect(201);
+
+    // A, B는 어제 가입한 기존 멤버로 백데이트, C는 오늘(실제 가입일 그대로) 가입해 분모에서 제외되어야 한다
+    await prisma.group_members.updateMany({
+      where: {
+        group_id: BigInt(groupId),
+        user_id: { in: [userAId, userBId] },
+      },
+      data: { joined_at: new Date(Date.now() - TWO_DAYS_MS) },
+    });
+
+    await request(app.getHttpServer())
+      .post('/groups/join')
+      .set('Authorization', `Bearer ${tokenC}`)
+      .send({ code: group.invite_code })
+      .expect(201);
+
+    const recordA = await request(app.getHttpServer())
+      .post('/records')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .field('exerciseType', '러닝')
+      .attach('file', TEST_IMAGE_PATH)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/shares')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ recordId: (recordA.body as RecordResponse).id, groupId })
+      .expect(201);
+
+    const recordB = await request(app.getHttpServer())
+      .post('/records')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .field('exerciseType', '요가')
+      .attach('file', TEST_IMAGE_PATH)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/shares')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ recordId: (recordB.body as RecordResponse).id, groupId })
+      .expect(201);
+
+    // C는 끝까지 공유하지 않는다
+
+    const finalGroupRes = await request(app.getHttpServer())
+      .get(`/groups/${groupId}`)
+      .set('Authorization', `Bearer ${tokenA}`)
       .expect(200);
 
-    expect(res.body as FeedResponse).toEqual({ locked: true, records: [] });
+    expect((finalGroupRes.body as GroupDetailResponse).current_streak).toBe(1);
   });
 });

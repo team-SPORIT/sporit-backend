@@ -51,7 +51,6 @@ export class RecordsController {
         file: { type: 'string', format: 'binary', description: '운동 사진' },
         exerciseType: { type: 'string', description: '운동 종류' },
         durationMin: { type: 'number', description: '운동 시간(분)' },
-        calories: { type: 'number', description: '소모 칼로리' },
         comment: { type: 'string', description: '코멘트' },
       },
     },

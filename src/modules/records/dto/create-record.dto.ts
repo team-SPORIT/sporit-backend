@@ -24,13 +24,6 @@ export class CreateRecordDto {
   @Min(0)
   durationMin?: number;
 
-  @ApiPropertyOptional({ description: '소모 칼로리', minimum: 0 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  calories?: number;
-
   @ApiPropertyOptional({ description: '코멘트', maxLength: 200 })
   @IsOptional()
   @IsString()

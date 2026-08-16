@@ -1,9 +1,10 @@
 generator client {
   provider        = "prisma-client"
   output          = "../generated/prisma"
-  moduleFormat    = "cjs"
   previewFeatures = ["partialIndexes"]
+  moduleFormat    = "cjs"
 }
+
 datasource db {
   provider = "postgresql"
   schemas  = ["auth", "public"]
@@ -499,29 +500,29 @@ model webauthn_credentials {
 }
 
 model group_members {
-  group_id         BigInt
-  user_id          String    @db.Uuid
-  current_streak   Int       @default(0)
-  last_shared_date DateTime? @db.Date
-  joined_at        DateTime  @default(now()) @db.Timestamptz(6)
-  groups           groups    @relation(fields: [group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  profiles         profiles  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  group_id  BigInt
+  user_id   String   @db.Uuid
+  joined_at DateTime @default(now()) @db.Timestamptz(6)
+  groups    groups   @relation(fields: [group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  profiles  profiles @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([group_id, user_id])
   @@schema("public")
 }
 
 model groups {
-  id            BigInt          @id @default(autoincrement())
-  name          String          @db.VarChar(50)
-  invite_code   String          @unique @db.VarChar(8)
-  max_members   Int             @default(10) @db.SmallInt
-  owner_id      String          @db.Uuid
-  created_at    DateTime        @default(now()) @db.Timestamptz(6)
-  group_members group_members[]
-  profiles      profiles        @relation(fields: [owner_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  record_shares record_shares[]
-  wake_up_logs  wake_up_logs[]
+  id                   BigInt          @id @default(autoincrement())
+  name                 String          @db.VarChar(50)
+  invite_code          String          @unique @db.VarChar(8)
+  max_members          Int             @default(10) @db.SmallInt
+  owner_id             String          @db.Uuid
+  created_at           DateTime        @default(now()) @db.Timestamptz(6)
+  current_streak       Int             @default(0)
+  last_all_shared_date DateTime?       @db.Date
+  group_members        group_members[]
+  profiles             profiles        @relation(fields: [owner_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  record_shares        record_shares[]
+  wake_up_logs         wake_up_logs[]
 
   @@schema("public")
 }
@@ -592,7 +593,6 @@ model records {
   user_id       String          @db.Uuid
   exercise_type String          @db.VarChar(30)
   duration_min  Int?
-  calories      Int?
   comment       String?         @db.VarChar(200)
   photo_url     String          @db.VarChar(500)
   record_date   DateTime        @db.Date
@@ -605,13 +605,12 @@ model records {
 }
 
 model user_exercise_stats {
-  user_id        String    @db.Uuid
-  exercise_type  String    @db.VarChar(30)
-  total_minutes  Int       @default(0)
-  total_count    Int       @default(0)
-  total_calories Int       @default(0)
-  last_at        DateTime? @db.Timestamptz(6)
-  profiles       profiles  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user_id       String    @db.Uuid
+  exercise_type String    @db.VarChar(30)
+  total_minutes Int       @default(0)
+  total_count   Int       @default(0)
+  last_at       DateTime? @db.Timestamptz(6)
+  profiles      profiles  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([user_id, exercise_type])
   @@schema("public")

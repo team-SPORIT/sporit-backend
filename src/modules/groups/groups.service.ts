@@ -155,7 +155,6 @@ export class GroupsService {
         recordId: share.record_id,
         exerciseType: share.records.exercise_type,
         durationMin: share.records.duration_min,
-        calories: share.records.calories,
         comment: share.records.comment,
         photoUrl: share.records.photo_url,
         recordDate: share.records.record_date,
