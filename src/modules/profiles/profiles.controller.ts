@@ -17,8 +17,11 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiInternalServerErrorResponse,
+  ApiNoContentResponse,
   ApiOperation,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { ProfilesService } from './profiles.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -87,7 +90,16 @@ export class ProfilesController {
   // 회원 탈퇴 (계정과 관련 데이터 삭제, 본문 없음)
   @Delete('me')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: '회원 탈퇴' })
+  @ApiOperation({
+    summary: '회원 탈퇴',
+    description:
+      '계정과 관련 데이터(기록, 댓글, 좋아요, 카테고리, 개인 종목 등)를 삭제한다. 내가 그룹장인 그룹은 다른 멤버가 있으면 가장 먼저 가입한 멤버에게 그룹장을 위임하고, 혼자뿐이면 그룹을 삭제한다. 여러 번 호출해도 안전하다(이미 삭제된 계정은 204). 탈퇴 후에는 기존 access token이 만료될 때까지 서버가 토큰 자체는 인정할 수 있으니, 프론트에서 로그아웃(세션/토큰 삭제) 처리를 해야 한다. 프로필/기록 사진 삭제는 계정 삭제 후 best-effort로 수행되며 실패해도 204를 반환한다.',
+  })
+  @ApiNoContentResponse({ description: '탈퇴 완료 (본문 없음)' })
+  @ApiUnauthorizedResponse({ description: '토큰이 없거나 유효하지 않음' })
+  @ApiInternalServerErrorResponse({
+    description: '계정 삭제에 실패함 (다시 시도하면 이어서 처리된다)',
+  })
   withdraw(@CurrentUser() user: { id: string; email: string }) {
     return this.profilesService.withdraw(user.id);
   }
