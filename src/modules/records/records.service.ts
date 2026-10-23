@@ -8,11 +8,20 @@ import {
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../common/supabase/supabase.service';
-import { getKstToday } from '../../common/utils/kst-date.util';
+import {
+  formatKstDate,
+  getKstRecentRange,
+  getKstToday,
+} from '../../common/utils/kst-date.util';
 import { ExercisesService } from '../exercises/exercises.service';
 import { CreateRecordDto } from './dto/create-record.dto';
 import type { RecordImageFiles } from './pipes/record-images.pipe';
-import { MIME_TO_EXT, RECORD_IMAGES_BUCKET } from './records.constants';
+import { RecentRecordsResponseDto } from './dto/recent-records-response.dto';
+import {
+  MIME_TO_EXT,
+  RECENT_DAYS,
+  RECORD_IMAGES_BUCKET,
+} from './records.constants';
 
 // 기록 응답에 종목 이름을 함께 내려주기 위한 include
 const RECORD_EXERCISE_INCLUDE = {
@@ -105,6 +114,56 @@ export class RecordsService {
     });
 
     return records.map((record) => this.toRecordResponse(record));
+  }
+
+  // 내 최근 기록 조회: KST 오늘을 포함한 최근 RECENT_DAYS일(record_date 기준)을 종목 이름별로 묶어서 내려준다.
+  // 같은 이름의 종목은 exercise_id가 달라도 한 종목으로 취급한다. 기간이 지난 기록도 DB에는 그대로 남아 있다.
+  // 기록 + 종목 이름을 한 번의 쿼리로 가져오고(N+1 없음) 서버에서 이름 기준으로 묶는다
+  async findMyRecentRecords(userId: string): Promise<RecentRecordsResponseDto> {
+    const { from, to } = getKstRecentRange(RECENT_DAYS);
+
+    const records = await this.prisma.records.findMany({
+      where: { user_id: userId, record_date: { gte: from, lte: to } },
+      include: { exercises: { select: { name: true } } },
+      orderBy: [{ record_date: 'desc' }, { created_at: 'desc' }],
+    });
+
+    const byName = new Map<
+      string,
+      RecentRecordsResponseDto['exercises'][number]
+    >();
+    for (const record of records) {
+      const exerciseType = record.exercises.name;
+      const group = byName.get(exerciseType) ?? {
+        exerciseType,
+        count: 0,
+        totalSeconds: 0,
+        records: [],
+      };
+      group.count += 1;
+      group.totalSeconds += record.duration_sec ?? 0;
+      group.records.push({
+        id: record.id,
+        exerciseId: record.exercise_id,
+        exerciseType,
+        durationSec: record.duration_sec,
+        comment: record.comment,
+        startImageUrl: record.start_image_url,
+        endImageUrl: record.end_image_url,
+        recordDate: formatKstDate(record.record_date),
+        createdAt: record.created_at,
+      });
+      byName.set(exerciseType, group);
+    }
+
+    // 종목은 가장 최근 기록(created_at)이 최신인 순으로 정렬한다
+    const exercises = [...byName.values()].sort(
+      (a, b) =>
+        Math.max(...b.records.map((r) => r.createdAt.getTime())) -
+        Math.max(...a.records.map((r) => r.createdAt.getTime())),
+    );
+
+    return { from: formatKstDate(from), to: formatKstDate(to), exercises };
   }
 
   // 기록 상세 조회 (본인 기록만)

@@ -31,6 +31,7 @@ import {
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateRecordDto } from './dto/create-record.dto';
+import { RecentRecordsResponseDto } from './dto/recent-records-response.dto';
 import { RecordResponseDto } from './dto/record-response.dto';
 import {
   type RecordImageFiles,
@@ -109,6 +110,15 @@ export class RecordsController {
     @Query('month', ParseIntPipe) month: number,
   ) {
     return this.recordsService.findMyRecordsByMonth(user.id, year, month);
+  }
+
+  // 내 최근 7일 기록 조회 (종목 이름별). 라우트 충돌을 피하려고 :id 라우트보다 먼저 선언한다
+  @Get('me/recent')
+  @ApiOperation({ summary: '내 최근 7일 기록 조회 (종목별)' })
+  findMyRecentRecords(
+    @CurrentUser() user: { id: string; email: string },
+  ): Promise<RecentRecordsResponseDto> {
+    return this.recordsService.findMyRecentRecords(user.id);
   }
 
   // 기록 상세 조회 (본인 기록만)
