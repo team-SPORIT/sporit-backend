@@ -24,7 +24,7 @@ export class FeedShareDto {
   @ApiProperty({ description: '운동 종류' })
   exerciseType: string;
 
-  @ApiProperty({ description: '운동 시간(분)', nullable: true })
+  @ApiProperty({ description: '운동 시간(초)', nullable: true })
   durationSec: number | null;
 
   @ApiProperty({ description: '코멘트', nullable: true })

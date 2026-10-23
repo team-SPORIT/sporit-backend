@@ -18,7 +18,11 @@ export class CreateRecordDto {
   @MaxLength(30)
   exerciseType: string;
 
-  @ApiPropertyOptional({ description: '운동 시간(분)', minimum: 0 })
+  @ApiPropertyOptional({
+    description: '운동 시간(초)',
+    minimum: 0,
+    maximum: 86400,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
