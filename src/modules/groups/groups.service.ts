@@ -7,6 +7,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
+import {
+  getColorHex,
+  randomPaletteKey,
+} from '../../common/constants/palette.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   getKstToday,
@@ -15,6 +19,7 @@ import {
 } from '../../common/utils/kst-date.util';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
 import { GroupExercisesResponseDto } from './dto/group-exercises-response.dto';
 import { SetGroupExercisesDto } from './dto/set-group-exercises.dto';
@@ -35,13 +40,29 @@ export class GroupsService {
   constructor(private readonly prisma: PrismaService) {}
 
   // 그룹 생성 (생성자를 owner이자 첫 멤버로 등록)
+  // color(생략하면 무작위 배정)와 허용 종목(allowAll/names)을 함께 받아 하나의 트랜잭션으로 처리한다:
+  // 그룹 생성, 그룹장 멤버십, 그룹 전용 종목 생성, group_exercises 연결, allow_all_exercises 설정 중 하나라도 실패하면 그룹이 만들어지지 않는다
   async create(userId: string, dto: CreateGroupDto) {
+    const allowAll = dto.allowAll ?? true;
+    const names = [...new Set(dto.names ?? [])];
+    if (allowAll && names.length > 0) {
+      throw new BadRequestException(
+        'allowAll이 true이면 names를 보낼 수 없습니다. 특정 종목만 허용하려면 allowAll을 false로 보내세요.',
+      );
+    }
+    if (!allowAll && names.length === 0) {
+      throw new BadRequestException(
+        '허용할 종목 이름(names)을 1개 이상 지정해야 합니다.',
+      );
+    }
+
     const inviteCode = await this.generateUniqueInviteCode();
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const group = await tx.groups.create({
+      const created = await tx.groups.create({
         data: {
           name: dto.name,
+          color: dto.color ?? randomPaletteKey(), // 색을 보내지 않으면 팔레트에서 무작위 배정
           invite_code: inviteCode,
           max_members: dto.maxMembers ?? DEFAULT_MAX_MEMBERS,
           owner_id: userId,
@@ -49,11 +70,28 @@ export class GroupsService {
       });
 
       await tx.group_members.create({
-        data: { group_id: group.id, user_id: userId },
+        data: { group_id: created.id, user_id: userId },
       });
 
-      return group;
+      if (!allowAll) {
+        await this.replaceAllowedExercises(tx, created.id, names);
+      }
+
+      // allow_all_exercises가 허용 종목 설정으로 바뀌었을 수 있어 최신 그룹 행으로 응답을 만든다
+      const group = await tx.groups.findUniqueOrThrow({
+        where: { id: created.id },
+      });
+      return {
+        ...this.withColorHex(group),
+        allowAll: group.allow_all_exercises,
+      };
     });
+  }
+
+  // 그룹 응답에 color(팔레트 key)에 대응하는 colorHex를 덧붙인다 (그룹 응답은 DB 컬럼 키 그대로 snake_case이고,
+  // 추가 필드인 memberCount처럼 colorHex는 camelCase로 둔다)
+  private withColorHex<T extends { color: string }>(group: T) {
+    return { ...group, colorHex: getColorHex(group.color) };
   }
 
   // 초대 코드로 그룹 참여
@@ -83,7 +121,7 @@ export class GroupsService {
       data: { group_id: group.id, user_id: userId },
     });
 
-    return group;
+    return this.withColorHex(group);
   }
 
   // 내가 속한 그룹 목록 (MY_GROUPS_ORDER_BY 정렬)
@@ -100,8 +138,34 @@ export class GroupsService {
     });
     return memberships.map(({ groups }) => {
       const { _count, ...group } = groups;
-      return { ...group, memberCount: _count.group_members };
+      return {
+        ...this.withColorHex(group),
+        memberCount: _count.group_members,
+      };
     });
+  }
+
+  // 그룹 수정 (그룹장만, 부분 수정): 그룹이 없으면 404, 그룹장이 아니면 403, 보낸 필드가 없으면 400
+  async update(userId: string, groupId: bigint, dto: UpdateGroupDto) {
+    const group = await this.prisma.groups.findUnique({
+      where: { id: groupId },
+      select: { owner_id: true },
+    });
+    if (!group) {
+      throw new NotFoundException('그룹을 찾을 수 없습니다.');
+    }
+    if (group.owner_id !== userId) {
+      throw new ForbiddenException('그룹장만 그룹 정보를 수정할 수 있습니다.');
+    }
+    if (dto.color === undefined) {
+      throw new BadRequestException('수정할 color를 보내야 합니다.');
+    }
+
+    const updated = await this.prisma.groups.update({
+      where: { id: groupId },
+      data: { color: dto.color },
+    });
+    return this.withColorHex(updated);
   }
 
   // 내가 속한 그룹 중 허용 종목이 제한된(allow_all_exercises=false) 그룹과 그 허용 종목 (내 그룹 목록과 같은 정렬)
@@ -114,6 +178,7 @@ export class GroupsService {
           select: {
             id: true,
             name: true,
+            color: true,
             group_exercises: {
               include: {
                 exercises: { select: { id: true, name: true } },
@@ -129,6 +194,8 @@ export class GroupsService {
     return memberships.map(({ groups }) => ({
       groupId: groups.id,
       groupName: groups.name,
+      color: groups.color,
+      colorHex: getColorHex(groups.color),
       exercises: groups.group_exercises.map(({ exercises }) => exercises),
     }));
   }
@@ -142,7 +209,7 @@ export class GroupsService {
       throw new ForbiddenException('그룹 멤버만 조회할 수 있습니다.');
     }
 
-    return this.prisma.groups.findUnique({
+    const group = await this.prisma.groups.findUnique({
       where: { id: groupId },
       include: {
         group_members: {
@@ -152,6 +219,7 @@ export class GroupsService {
         },
       },
     });
+    return group && this.withColorHex(group);
   }
 
   // 그룹 허용 종목 조회 (멤버만 가능). allow_all_exercises가 true면 제한 없음
@@ -206,48 +274,45 @@ export class GroupsService {
     }
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const exerciseIds: bigint[] = [];
-      for (const name of names) {
-        exerciseIds.push(
-          await this.findOrCreateGroupExercise(tx, groupId, name),
-        );
-      }
-
-      await tx.groups.update({
-        where: { id: groupId },
-        data: { allow_all_exercises: false },
-      });
-      await tx.group_exercises.deleteMany({ where: { group_id: groupId } });
-      await tx.group_exercises.createMany({
-        data: exerciseIds.map((exerciseId) => ({
-          group_id: groupId,
-          exercise_id: exerciseId,
-        })),
-      });
-
+      await this.replaceAllowedExercises(tx, groupId, names);
       return this.findGroupExercises(tx, groupId);
     });
   }
 
-  // 이 그룹의 그룹 전용 종목을 이름으로 찾고, 없으면 새로 만든다
-  private async findOrCreateGroupExercise(
+  // 허용 종목을 names로 전체 교체한다 (호출부의 트랜잭션 안에서 실행)
+  // 이 그룹의 그룹 전용 종목을 이름으로 찾고 없는 이름은 새로 만든 뒤, allow_all_exercises를 끄고 group_exercises를 교체한다.
+  // 이름마다 쿼리하면 트랜잭션 제한 시간(5초)을 넘길 수 있어, 조회/생성을 묶어서 처리한다 (쿼리 수가 이름 개수와 무관)
+  // 허용 목록에서 빠진 그룹 전용 종목은 삭제하지 않는다 (기록이 참조 중일 수 있음)
+  private async replaceAllowedExercises(
     tx: Prisma.TransactionClient,
     groupId: bigint,
-    name: string,
-  ): Promise<bigint> {
-    const existing = await tx.exercises.findFirst({
-      where: { group_id: groupId, name },
-      select: { id: true },
+    names: string[],
+  ) {
+    const existing = await tx.exercises.findMany({
+      where: { group_id: groupId, name: { in: names } },
+      select: { name: true },
     });
-    if (existing) {
-      return existing.id;
+    const existingNames = new Set(existing.map((exercise) => exercise.name));
+    const missing = names.filter((name) => !existingNames.has(name));
+    if (missing.length > 0) {
+      await tx.exercises.createMany({
+        data: missing.map((name) => ({ group_id: groupId, name })),
+      });
     }
 
-    const created = await tx.exercises.create({
-      data: { group_id: groupId, name },
+    const exercises = await tx.exercises.findMany({
+      where: { group_id: groupId, name: { in: names } },
       select: { id: true },
     });
-    return created.id;
+
+    await tx.groups.update({
+      where: { id: groupId },
+      data: { allow_all_exercises: false },
+    });
+    await tx.group_exercises.deleteMany({ where: { group_id: groupId } });
+    await tx.group_exercises.createMany({
+      data: exercises.map(({ id }) => ({ group_id: groupId, exercise_id: id })),
+    });
   }
 
   // 그룹 허용 종목 조회 (id순). allowAll과 관계없이 저장된 허용 목록을 내려준다

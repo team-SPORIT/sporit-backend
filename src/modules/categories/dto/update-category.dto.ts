@@ -1,10 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsIn, IsOptional, IsString, Length } from 'class-validator';
-import {
-  CATEGORY_COLORS,
-  CATEGORY_NAME_MAX_LENGTH,
-} from '../categories.constants';
+import { PALETTE_KEYS } from '../../../common/constants/palette.constants';
+import { CATEGORY_NAME_MAX_LENGTH } from '../categories.constants';
 
 // 카테고리 부분 수정용 DTO (보낸 필드만 수정, 둘 다 없으면 400)
 export class UpdateCategoryDto {
@@ -24,10 +22,10 @@ export class UpdateCategoryDto {
 
   @ApiPropertyOptional({
     description: '색상 팔레트 키 (GET /categories/colors 참고)',
-    enum: CATEGORY_COLORS,
+    enum: PALETTE_KEYS,
     example: 'red',
   })
   @IsOptional()
-  @IsIn(CATEGORY_COLORS)
+  @IsIn(PALETTE_KEYS)
   color?: string;
 }

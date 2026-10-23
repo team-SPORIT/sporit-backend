@@ -525,6 +525,7 @@ model groups {
   created_at          DateTime          @default(now()) @db.Timestamptz(6)
   last_shared_at      DateTime?         @db.Timestamptz(6)
   allow_all_exercises Boolean           @default(true)
+  color               String            @default("blue") @db.VarChar(20)
   exercises           exercises[]
   group_exercises     group_exercises[]
   group_members       group_members[]

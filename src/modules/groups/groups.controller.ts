@@ -7,6 +7,7 @@ import {
   HttpStatus,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -15,22 +16,27 @@ import {
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { GroupsService } from './groups.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 import { GroupExercisesResponseDto } from './dto/group-exercises-response.dto';
 import { SetGroupExercisesDto } from './dto/set-group-exercises.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
 import {
+  CreateGroupResponseDto,
   GroupDetailResponseDto,
   GroupListItemDto,
+  GroupResponseDto,
 } from './dto/group-response.dto';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -44,7 +50,16 @@ export class GroupsController {
 
   // 그룹 생성
   @Post()
-  @ApiOperation({ summary: '그룹 생성' })
+  @ApiOperation({
+    summary: '그룹 생성',
+    description:
+      'color(팔레트 키)를 보내지 않으면 팔레트에서 무작위로 배정된다. allowAll을 생략하면 true(모든 종목 허용)이고, false이면 names(1개 이상)로 이 그룹의 그룹 전용 종목을 만들어 허용 목록으로 설정한다. allowAll이 true인데 names를 보내면 400. 그룹/멤버십/종목/허용 목록은 하나의 트랜잭션으로 처리되어 중간에 실패하면 그룹이 만들어지지 않는다. 응답에는 color, colorHex, allowAll이 포함된다.',
+  })
+  @ApiCreatedResponse({ type: CreateGroupResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      '팔레트에 없는 color, allowAll=false인데 names가 없음, allowAll=true인데 names가 있음, 이름 길이(1~30자)/개수(최대 50) 오류',
+  })
   create(
     @CurrentUser() user: { id: string; email: string },
     @Body() createGroupDto: CreateGroupDto,
@@ -54,6 +69,7 @@ export class GroupsController {
 
   // 초대 코드로 그룹 참여
   @Post('join')
+  @ApiCreatedResponse({ type: GroupResponseDto })
   @ApiOperation({
     summary: '초대 코드로 그룹 참여',
     description: '초대 코드는 대소문자 구분 없이 입력할 수 있다.',
@@ -86,6 +102,32 @@ export class GroupsController {
     @Param('id') id: string,
   ) {
     return this.groupsService.findOne(user.id, this.toBigIntId(id));
+  }
+
+  // 그룹 수정 (그룹장만, 지금은 색상만)
+  @Patch(':id')
+  @ApiOperation({
+    summary: '그룹 수정 (그룹장만, 색상)',
+    description:
+      '그룹장만 가능. 지금은 color(팔레트 키)만 수정할 수 있고 보낸 필드만 반영한다. 아무 필드도 없으면 400.',
+  })
+  @ApiParam({ name: 'id', description: '그룹 ID' })
+  @ApiOkResponse({ type: GroupResponseDto })
+  @ApiBadRequestResponse({
+    description: '팔레트에 없는 color이거나 수정할 필드가 없음',
+  })
+  @ApiForbiddenResponse({ description: '그룹장이 아님' })
+  @ApiNotFoundResponse({ description: '그룹을 찾을 수 없음' })
+  update(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+    @Body() updateGroupDto: UpdateGroupDto,
+  ) {
+    return this.groupsService.update(
+      user.id,
+      this.toBigIntId(id),
+      updateGroupDto,
+    );
   }
 
   // 그룹 허용 종목 조회 (멤버만 가능)

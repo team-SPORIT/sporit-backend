@@ -8,8 +8,8 @@ import {
   IsString,
   Length,
 } from 'class-validator';
+import { PALETTE_KEYS } from '../../../common/constants/palette.constants';
 import {
-  CATEGORY_COLORS,
   CATEGORY_NAME_MAX_LENGTH,
   EXERCISE_NAME_MAX_LENGTH,
   MAX_EXERCISE_NAMES_PER_REQUEST,
@@ -33,10 +33,10 @@ export class CreateCategoryDto {
 
   @ApiProperty({
     description: '색상 팔레트 키 (GET /categories/colors 참고)',
-    enum: CATEGORY_COLORS,
+    enum: PALETTE_KEYS,
     example: 'blue',
   })
-  @IsIn(CATEGORY_COLORS)
+  @IsIn(PALETTE_KEYS)
   color: string;
 
   @ApiPropertyOptional({

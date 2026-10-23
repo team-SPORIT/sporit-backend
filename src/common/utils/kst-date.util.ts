@@ -62,3 +62,40 @@ export function getKstRecentRange(days: number): { from: Date; to: Date } {
   const to = getKstToday();
   return { from: subtractDays(to, days - 1), to };
 }
+
+// "YYYY-MM" 문자열을 연/월로 파싱. 형식이 잘못되었거나 월이 01~12가 아니면 null
+export function parseKstMonth(
+  monthStr: string,
+): { year: number; month: number } | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthStr);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  return month >= 1 && month <= 12 ? { year, month } : null;
+}
+
+// 해당 월의 1일과 말일 (둘 다 getKstToday() 형태: KST 날짜를 UTC 자정 값으로 표현)
+export function getKstMonthRange(
+  year: number,
+  month: number,
+): { from: Date; to: Date } {
+  return {
+    from: new Date(Date.UTC(year, month - 1, 1)),
+    to: new Date(Date.UTC(year, month, 0)), // 다음 달 0일 = 이번 달 말일
+  };
+}
+
+// getKstToday() 형태의 날짜를 "YYYY-MM" 문자열로 변환
+export function formatKstMonth(date: Date): string {
+  return date.toISOString().slice(0, 7);
+}
+
+// 실제 시각(timestamptz)을 KST 기준 날짜로 변환 (getKstToday() 형태: KST 날짜의 UTC 자정 값)
+// 예: 2026-09-30T16:00:00Z(= KST 10월 1일 01:00) -> 2026-10-01
+export function toKstDate(instant: Date): Date {
+  const kst = new Date(instant.getTime() + KST_OFFSET_MS);
+  return new Date(
+    Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()),
+  );
+}

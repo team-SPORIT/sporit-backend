@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { CATEGORY_COLORS } from '../categories.constants';
+import { PALETTE_KEYS } from '../../../common/constants/palette.constants';
 
 // 카테고리 응답 (키는 camelCase. id는 BigInt라 전역 toJSON에 의해 문자열로 직렬화됨)
 export class CategoryResponseDto {
@@ -11,10 +11,19 @@ export class CategoryResponseDto {
 
   @ApiProperty({
     description: '색상 팔레트 키',
-    enum: CATEGORY_COLORS,
+    enum: PALETTE_KEYS,
     example: 'blue',
   })
   color: string;
+
+  @ApiProperty({
+    description:
+      '색상 hex 값 (color 키에 대응). 이전 팔레트의 키가 남아 있으면 null',
+    type: String,
+    nullable: true,
+    example: '#0079FF',
+  })
+  colorHex: string | null;
 
   @ApiProperty({
     description: '이 카테고리에 매핑된 종목 이름 목록 (이름순)',
@@ -26,12 +35,22 @@ export class CategoryResponseDto {
 }
 
 // 색상 팔레트 응답
+export class PaletteColorDto {
+  @ApiProperty({
+    description: '팔레트 키 (color 값으로 사용)',
+    example: 'blue',
+  })
+  key: string;
+
+  @ApiProperty({ description: '색상 hex 값', example: '#0079FF' })
+  hex: string;
+}
+
 export class CategoryColorsResponseDto {
   @ApiProperty({
-    description: '사용할 수 있는 색상 팔레트 키 목록',
-    type: String,
+    description: '사용할 수 있는 색상 팔레트 (12색)',
+    type: PaletteColorDto,
     isArray: true,
-    example: CATEGORY_COLORS,
   })
-  colors: string[];
+  colors: PaletteColorDto[];
 }
