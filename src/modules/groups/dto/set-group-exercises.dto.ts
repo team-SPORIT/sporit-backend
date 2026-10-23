@@ -8,10 +8,7 @@ import {
   IsString,
   Length,
 } from 'class-validator';
-
-// 앞뒤 공백 제거 + 연속 공백을 1개로 정리 (문자열이 아니면 그대로 두어 검증이 400 처리)
-const normalizeName = (value: unknown) =>
-  typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value;
+import { normalizeNames } from './normalize-names';
 
 // 그룹 허용 종목 설정용 DTO
 export class SetGroupExercisesDto {
@@ -33,9 +30,7 @@ export class SetGroupExercisesDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(50)
-  @Transform(({ value }: { value: unknown }) =>
-    Array.isArray(value) ? value.map(normalizeName) : value,
-  )
+  @Transform(normalizeNames)
   @IsString({ each: true })
   @Length(1, 30, { each: true })
   names?: string[];

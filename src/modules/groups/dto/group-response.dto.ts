@@ -47,6 +47,15 @@ export class GroupResponseDto {
   last_shared_at: Date | null;
 }
 
+// 그룹 생성 응답: 그룹 기본 정보 + 모든 종목 허용 여부
+export class CreateGroupResponseDto extends GroupResponseDto {
+  @ApiProperty({
+    description:
+      '모든 종목 허용 여부 (allow_all_exercises와 같은 값을 camelCase로 추가한 필드). false면 names로 만든 그룹 전용 종목만 공유할 수 있다',
+  })
+  allowAll: boolean;
+}
+
 // 내 그룹 목록 항목: 그룹 기본 정보 + 멤버 수
 export class GroupListItemDto extends GroupResponseDto {
   @ApiProperty({ description: '현재 멤버 수' })

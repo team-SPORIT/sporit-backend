@@ -33,6 +33,7 @@ import { GroupExercisesResponseDto } from './dto/group-exercises-response.dto';
 import { SetGroupExercisesDto } from './dto/set-group-exercises.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
 import {
+  CreateGroupResponseDto,
   GroupDetailResponseDto,
   GroupListItemDto,
   GroupResponseDto,
@@ -52,10 +53,13 @@ export class GroupsController {
   @ApiOperation({
     summary: '그룹 생성',
     description:
-      'color(팔레트 키)를 보내지 않으면 팔레트에서 무작위로 배정된다. 응답에는 color와 colorHex가 포함된다.',
+      'color(팔레트 키)를 보내지 않으면 팔레트에서 무작위로 배정된다. allowAll을 생략하면 true(모든 종목 허용)이고, false이면 names(1개 이상)로 이 그룹의 그룹 전용 종목을 만들어 허용 목록으로 설정한다. allowAll이 true인데 names를 보내면 400. 그룹/멤버십/종목/허용 목록은 하나의 트랜잭션으로 처리되어 중간에 실패하면 그룹이 만들어지지 않는다. 응답에는 color, colorHex, allowAll이 포함된다.',
   })
-  @ApiCreatedResponse({ type: GroupResponseDto })
-  @ApiBadRequestResponse({ description: '팔레트에 없는 color 등 형식 오류' })
+  @ApiCreatedResponse({ type: CreateGroupResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      '팔레트에 없는 color, allowAll=false인데 names가 없음, allowAll=true인데 names가 있음, 이름 길이(1~30자)/개수(최대 50) 오류',
+  })
   create(
     @CurrentUser() user: { id: string; email: string },
     @Body() createGroupDto: CreateGroupDto,
