@@ -73,6 +73,7 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
   let groupId: string;
   let inviteCode: string;
   let recordId: string;
+  const extraUserIds: string[] = [];
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -89,7 +90,7 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
   afterAll(async () => {
     await app.close();
     await cleanupTestData({
-      userIds: [userAId, userBId],
+      userIds: [userAId, userBId, ...extraUserIds],
       groupIds: groupId ? [BigInt(groupId)] : [],
     });
     await disconnectPrisma();
@@ -140,6 +141,59 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       where: { group_id: BigInt(groupId) },
       data: { joined_at: new Date(Date.now() - TWO_DAYS_MS) },
     });
+  });
+
+  it('3-1. 소문자로 바꾼 초대코드로 POST /groups/join 하면 대소문자 구분 없이 참여한다', async () => {
+    const joiner = await createTestUser(
+      `sporit-e2e-case-${runId}@example.com`,
+      'Test1234!',
+    );
+    const token = await getAccessToken(joiner.email, 'Test1234!');
+    extraUserIds.push(joiner.id);
+    await request(app.getHttpServer())
+      .post('/auth/sync')
+      .set('Authorization', `Bearer ${token}`);
+
+    // 앞뒤 공백이 있어도 trim 되어 참여한다 (소문자 + 공백)
+    const res = await request(app.getHttpServer())
+      .post('/groups/join')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ code: `  ${inviteCode.toLowerCase()}  ` })
+      .expect(201);
+    expect((res.body as GroupResponse).id).toBe(groupId);
+
+    // 이미 참여한 그룹에 소문자 코드로 다시 참여하면 409
+    await request(app.getHttpServer())
+      .post('/groups/join')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ code: inviteCode.toLowerCase() })
+      .expect(409);
+  });
+
+  it('3-2. 소문자만으로 된 초대코드로 참여한다 (공백 없음)', async () => {
+    const joiner = await createTestUser(
+      `sporit-e2e-lower-${runId}@example.com`,
+      'Test1234!',
+    );
+    const token = await getAccessToken(joiner.email, 'Test1234!');
+    extraUserIds.push(joiner.id);
+    await request(app.getHttpServer())
+      .post('/auth/sync')
+      .set('Authorization', `Bearer ${token}`);
+
+    await request(app.getHttpServer())
+      .post('/groups/join')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ code: inviteCode.toLowerCase() })
+      .expect(201);
+  });
+
+  it('3-3. 존재하지 않는 코드(소문자)는 404이다', async () => {
+    await request(app.getHttpServer())
+      .post('/groups/join')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ code: 'zzzzzzzz' })
+      .expect(404);
   });
 
   it('4. A가 GET /groups/:id/feed 하면 아직 공유 전이라 잠겨 있다', async () => {
