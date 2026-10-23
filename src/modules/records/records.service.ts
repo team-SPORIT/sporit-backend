@@ -108,7 +108,10 @@ export class RecordsService {
     const record = await this.findOne(userId, id);
 
     await this.prisma.records.delete({ where: { id } });
-    await this.deleteRecordImage(record.start_image_url);
+    await this.deleteRecordImages([
+      record.start_image_url,
+      record.end_image_url,
+    ]);
   }
 
   // 시작/종료 이미지를 record-images 버킷에 업로드하고 경로와 public URL 반환
@@ -166,21 +169,17 @@ export class RecordsService {
     }
   }
 
-  // photo_url에서 버킷 내부 경로를 추출해 Storage에서 삭제 (실패해도 기록 삭제 자체는 성공 처리)
-  private async deleteRecordImage(photoUrl: string) {
+  // 이미지 URL들에서 버킷 내부 경로를 추출해 Storage에서 삭제 (실패해도 기록 삭제 자체는 성공 처리)
+  private async deleteRecordImages(imageUrls: string[]) {
     const marker = `/${RECORD_IMAGES_BUCKET}/`;
-    const index = photoUrl.indexOf(marker);
-    if (index === -1) return;
+    const paths = imageUrls
+      .map((url) => {
+        const index = url.indexOf(marker);
+        return index === -1 ? null : url.slice(index + marker.length);
+      })
+      .filter((path): path is string => path !== null);
 
-    const path = photoUrl.slice(index + marker.length);
-    const storage = this.supabase
-      .getClient()
-      .storage.from(RECORD_IMAGES_BUCKET);
-    try {
-      await storage.remove([path]);
-    } catch {
-      // 이미지 삭제 실패는 무시
-    }
+    await this.removeFromStorage(paths);
   }
 
   // 개인 스트릭 갱신: 오늘 이미 기록했으면 유지, 어제 기록이 있었으면 +1, 그 외(하루 이상 걸렀거나 첫 기록)면 1로 초기화
