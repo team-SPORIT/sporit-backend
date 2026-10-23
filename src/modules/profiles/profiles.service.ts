@@ -118,6 +118,9 @@ export class ProfilesService {
               data: { owner_id: nextOwner.user_id },
             });
           } else {
+            // 그룹 전용 종목은 그룹 삭제 시 함께 지워지는데 기록이 참조 중이면(RESTRICT) 삭제가 막히므로
+            // 먼저 기록/통계를 작성자의 개인 종목으로 옮긴다
+            await this.migrateGroupExercisesToPersonal(tx, groupId);
             await tx.groups.delete({ where: { id: groupId } });
           }
         }
@@ -125,6 +128,118 @@ export class ProfilesService {
       // 그룹이 많은 경우를 고려해 기본 제한 시간(5초)보다 넉넉하게 둔다
       { timeout: 30_000 },
     );
+  }
+
+  // 그룹 전용 종목(exercises.group_id)을 참조하는 기록과 종목 통계를 작성자별 "같은 이름의 개인 종목"으로 옮긴다.
+  // 작성자에게 같은 이름의 개인 종목이 없으면 새로 만든다. 탈퇴하는 그룹장 본인의 기록도 같은 방식으로 옮긴다
+  // (계정 삭제가 실패해 재시도하는 경우에도 데이터가 먼저 사라지지 않도록 기록을 삭제하지 않고 이관한다).
+  // 통계는 작성자에게 같은 이름의 개인 종목 통계가 이미 있으면 합산(total_seconds, total_count)하고 last_at은 더 최근 값을 쓴다.
+  private async migrateGroupExercisesToPersonal(
+    tx: Prisma.TransactionClient,
+    groupId: bigint,
+  ) {
+    const groupExercises = await tx.exercises.findMany({
+      where: { group_id: groupId },
+      select: { id: true, name: true },
+    });
+    if (groupExercises.length === 0) return;
+
+    const exerciseIds = groupExercises.map((exercise) => exercise.id);
+    const nameById = new Map(
+      groupExercises.map((exercise) => [exercise.id, exercise.name]),
+    );
+
+    // 이 종목들을 쓴 (작성자, 종목) 조합: 기록 또는 통계가 있는 모든 경우
+    const usedByRecords = await tx.records.findMany({
+      where: { exercise_id: { in: exerciseIds } },
+      select: { user_id: true, exercise_id: true },
+      distinct: ['user_id', 'exercise_id'],
+    });
+    const stats = await tx.user_exercise_stats.findMany({
+      where: { exercise_id: { in: exerciseIds } },
+    });
+    const pairs = new Map<string, { userId: string; exerciseId: bigint }>();
+    for (const { user_id, exercise_id } of [...usedByRecords, ...stats]) {
+      pairs.set(`${user_id}:${exercise_id}`, {
+        userId: user_id,
+        exerciseId: exercise_id,
+      });
+    }
+
+    for (const { userId, exerciseId } of pairs.values()) {
+      const name = nameById.get(exerciseId)!;
+      const personalId = await this.findOrCreatePersonalExercise(
+        tx,
+        userId,
+        name,
+      );
+
+      await tx.records.updateMany({
+        where: { user_id: userId, exercise_id: exerciseId },
+        data: { exercise_id: personalId },
+      });
+
+      const source = stats.find(
+        (row) => row.user_id === userId && row.exercise_id === exerciseId,
+      );
+      if (!source) continue;
+
+      const target = await tx.user_exercise_stats.findUnique({
+        where: {
+          user_id_exercise_id: { user_id: userId, exercise_id: personalId },
+        },
+      });
+      if (target) {
+        await tx.user_exercise_stats.update({
+          where: {
+            user_id_exercise_id: { user_id: userId, exercise_id: personalId },
+          },
+          data: {
+            total_seconds: target.total_seconds + source.total_seconds,
+            total_count: target.total_count + source.total_count,
+            last_at: this.latest(target.last_at, source.last_at),
+          },
+        });
+        await tx.user_exercise_stats.delete({
+          where: {
+            user_id_exercise_id: { user_id: userId, exercise_id: exerciseId },
+          },
+        });
+      } else {
+        await tx.user_exercise_stats.update({
+          where: {
+            user_id_exercise_id: { user_id: userId, exercise_id: exerciseId },
+          },
+          data: { exercise_id: personalId },
+        });
+      }
+    }
+  }
+
+  // 작성자의 같은 이름 개인 종목을 찾고, 없으면 만든다
+  private async findOrCreatePersonalExercise(
+    tx: Prisma.TransactionClient,
+    ownerId: string,
+    name: string,
+  ): Promise<bigint> {
+    const existing = await tx.exercises.findFirst({
+      where: { owner_id: ownerId, name },
+      select: { id: true },
+    });
+    if (existing) return existing.id;
+
+    const created = await tx.exercises.create({
+      data: { owner_id: ownerId, name },
+      select: { id: true },
+    });
+    return created.id;
+  }
+
+  // 두 시각 중 더 최근 값 (null이면 다른 쪽)
+  private latest(a: Date | null, b: Date | null): Date | null {
+    if (!a) return b;
+    if (!b) return a;
+    return a > b ? a : b;
   }
 
   // Supabase 계정 삭제(service_role). 이미 없는 계정이면 성공으로 보고, 그 외 실패는 500으로 던져 탈퇴 실패를 알린다
