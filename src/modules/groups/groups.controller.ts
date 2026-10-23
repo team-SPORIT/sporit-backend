@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
@@ -21,6 +22,10 @@ import { GroupsService } from './groups.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
+import {
+  GroupDetailResponseDto,
+  GroupListItemDto,
+} from './dto/group-response.dto';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -56,7 +61,12 @@ export class GroupsController {
 
   // 내 그룹 목록 조회
   @Get()
-  @ApiOperation({ summary: '내 그룹 목록 조회' })
+  @ApiOperation({
+    summary: '내 그룹 목록 조회',
+    description:
+      '최근 공유순(last_shared_at 내림차순)으로 정렬. 공유가 없는 그룹은 맨 뒤, 같으면 참여 순',
+  })
+  @ApiOkResponse({ type: GroupListItemDto, isArray: true })
   findMyGroups(@CurrentUser() user: { id: string; email: string }) {
     return this.groupsService.findMyGroups(user.id);
   }
@@ -64,6 +74,7 @@ export class GroupsController {
   // 그룹 상세 조회 (멤버만 가능)
   @Get(':id')
   @ApiOperation({ summary: '그룹 상세 조회' })
+  @ApiOkResponse({ type: GroupDetailResponseDto })
   findOne(
     @CurrentUser() user: { id: string; email: string },
     @Param('id') id: string,
