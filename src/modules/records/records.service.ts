@@ -7,11 +7,7 @@ import {
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../common/supabase/supabase.service';
-import {
-  getKstToday,
-  isSameDate,
-  subtractDays,
-} from '../../common/utils/kst-date.util';
+import { getKstToday } from '../../common/utils/kst-date.util';
 import { CreateRecordDto } from './dto/create-record.dto';
 import type { RecordImageFiles } from './pipes/record-images.pipe';
 import { MIME_TO_EXT, RECORD_IMAGES_BUCKET } from './records.constants';
@@ -24,7 +20,7 @@ export class RecordsService {
   ) {}
 
   // 운동 기록 작성
-  // 이미지 2장(시작/종료)은 트랜잭션 밖(외부 스토리지)에서 먼저 업로드하고, 기록 생성 + 스트릭 갱신 + 종목 통계 upsert는 하나의 트랜잭션으로 묶는다
+  // 이미지 2장(시작/종료)은 트랜잭션 밖(외부 스토리지)에서 먼저 업로드하고, 기록 생성 + 종목 통계 upsert는 하나의 트랜잭션으로 묶는다
   // DB 저장이 실패하면 이미 올라간 이미지 2장을 지워 고아 파일을 남기지 않는다
   async create(userId: string, dto: CreateRecordDto, files: RecordImageFiles) {
     const { startPath, endPath, startImageUrl, endImageUrl } =
@@ -65,7 +61,6 @@ export class RecordsService {
         },
       });
 
-      await this.updateStreak(tx, userId, recordDate);
       await this.upsertExerciseStats(
         tx,
         userId,
@@ -103,7 +98,7 @@ export class RecordsService {
   }
 
   // 기록 삭제 (본인 기록만)
-  // MVP: 스트릭/종목 통계 역산은 복잡하므로 이번엔 처리하지 않는다 (추후 논의)
+  // MVP: 종목 통계 역산은 복잡하므로 이번엔 처리하지 않는다 (추후 논의)
   async remove(userId: string, id: bigint) {
     const record = await this.findOne(userId, id);
 
@@ -180,41 +175,6 @@ export class RecordsService {
       .filter((path): path is string => path !== null);
 
     await this.removeFromStorage(paths);
-  }
-
-  // 개인 스트릭 갱신: 오늘 이미 기록했으면 유지, 어제 기록이 있었으면 +1, 그 외(하루 이상 걸렀거나 첫 기록)면 1로 초기화
-  private async updateStreak(
-    tx: Prisma.TransactionClient,
-    userId: string,
-    today: Date,
-  ) {
-    const profile = await tx.profiles.findUnique({
-      where: { id: userId },
-      select: { current_streak: true, last_record_date: true },
-    });
-    if (!profile) {
-      throw new NotFoundException('프로필을 찾을 수 없습니다.');
-    }
-
-    const { last_record_date: lastRecordDate, current_streak: currentStreak } =
-      profile;
-
-    let nextStreak: number;
-    if (lastRecordDate && isSameDate(lastRecordDate, today)) {
-      nextStreak = currentStreak;
-    } else if (
-      lastRecordDate &&
-      isSameDate(lastRecordDate, subtractDays(today, 1))
-    ) {
-      nextStreak = currentStreak + 1;
-    } else {
-      nextStreak = 1;
-    }
-
-    await tx.profiles.update({
-      where: { id: userId },
-      data: { current_streak: nextStreak, last_record_date: today },
-    });
   }
 
   // 종목별 통계 upsert: 횟수 +1, 시간(초) 누적 (값이 없으면 0)

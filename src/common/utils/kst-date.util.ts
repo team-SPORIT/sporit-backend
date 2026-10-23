@@ -20,11 +20,6 @@ export function subtractDays(date: Date, days: number): Date {
   return new Date(date.getTime() - days * DAY_MS);
 }
 
-// 시간을 무시하고 두 날짜가 같은 날인지 비교
-export function isSameDate(a: Date, b: Date): boolean {
-  return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
-}
-
 // "YYYY-MM-DD" 쿼리 문자열을 getKstToday()와 같은 형태(KST 날짜, UTC 자정 값)로 파싱. 형식이 잘못되면 null
 export function parseKstDate(dateStr: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
