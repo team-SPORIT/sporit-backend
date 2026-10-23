@@ -12,6 +12,13 @@ export class WeeklyExerciseStatsDto {
   count: number;
 }
 
+// 지난주 요약
+export class PreviousWeekStatsDto {
+  weekStart: string;
+  totalSeconds: number;
+  comparableSeconds: number;
+}
+
 // 주간 운동 통계 응답
 export class WeeklyStatsResponseDto {
   weekStart: string;
@@ -20,4 +27,6 @@ export class WeeklyStatsResponseDto {
   totalCount: number;
   days: WeeklyDayStatsDto[];
   byExercise: WeeklyExerciseStatsDto[];
+  previous: PreviousWeekStatsDto;
+  diffSeconds: number;
 }

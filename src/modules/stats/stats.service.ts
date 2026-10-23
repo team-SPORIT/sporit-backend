@@ -6,6 +6,7 @@ import {
   getKstToday,
   getKstWeekStart,
   parseKstDate,
+  subtractDays,
 } from '../../common/utils/kst-date.util';
 import {
   WeeklyDayStatsDto,
@@ -14,6 +15,7 @@ import {
 } from './dto/weekly-stats-response.dto';
 
 const DAYS_IN_WEEK = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // record_date + 종목 단위로 묶은 집계 행
 interface DailyExerciseRow {
@@ -41,23 +43,62 @@ export class StatsService {
 
     const weekStart = getKstWeekStart(baseDate);
     const weekEnd = addDays(weekStart, DAYS_IN_WEEK - 1);
+    const previousWeekStart = subtractDays(weekStart, DAYS_IN_WEEK);
 
+    // 이번 주 + 지난주(14일치)를 한 번의 쿼리로 가져와 서버에서 나눠 합산한다
     const rows = await this.aggregateDailyByExercise(
       userId,
-      weekStart,
+      previousWeekStart,
       weekEnd,
     );
+    const weekStartKey = formatKstDate(weekStart);
+    const currentRows = rows.filter((row) => row.date >= weekStartKey);
 
-    const days = this.buildDays(weekStart, rows);
+    const days = this.buildDays(weekStart, currentRows);
+    const previousDays = this.buildDays(previousWeekStart, rows);
+    const totalSeconds = days.reduce((sum, day) => sum + day.totalSeconds, 0);
+    const previousTotalSeconds = previousDays.reduce(
+      (sum, day) => sum + day.totalSeconds,
+      0,
+    );
+    const comparableSeconds = this.sumComparableSeconds(
+      previousDays,
+      weekStart,
+    );
 
     return {
-      weekStart: formatKstDate(weekStart),
+      weekStart: weekStartKey,
       weekEnd: formatKstDate(weekEnd),
-      totalSeconds: days.reduce((sum, day) => sum + day.totalSeconds, 0),
+      totalSeconds,
       totalCount: days.reduce((sum, day) => sum + day.count, 0),
       days,
-      byExercise: this.buildByExercise(rows),
+      byExercise: this.buildByExercise(currentRows),
+      previous: {
+        weekStart: formatKstDate(previousWeekStart),
+        totalSeconds: previousTotalSeconds,
+        comparableSeconds,
+      },
+      diffSeconds: totalSeconds - comparableSeconds,
     };
+  }
+
+  // 지난주 중 비교 대상 구간의 합계
+  // 이번 주를 조회 중이면 오늘과 같은 요일까지만, 이미 지난 주나 아직 오지 않은 주면 7일 전체
+  private sumComparableSeconds(
+    previousDays: WeeklyDayStatsDto[],
+    weekStart: Date,
+  ): number {
+    const today = getKstToday();
+    const dayIndexOfToday = Math.round(
+      (today.getTime() - weekStart.getTime()) / DAY_MS,
+    );
+    const isCurrentWeek =
+      dayIndexOfToday >= 0 && dayIndexOfToday < DAYS_IN_WEEK;
+    const comparableDays = isCurrentWeek
+      ? previousDays.slice(0, dayIndexOfToday + 1)
+      : previousDays;
+
+    return comparableDays.reduce((sum, day) => sum + day.totalSeconds, 0);
   }
 
   // [start, end] 범위의 내 기록을 한 번의 쿼리로 날짜/종목별 합산 (duration_sec가 null이면 0으로 취급, count에는 포함)
