@@ -118,13 +118,28 @@ export class RecordsService {
 
   // 내 최근 기록 조회: KST 오늘을 포함한 최근 RECENT_DAYS일(record_date 기준)을 종목 이름별로 묶어서 내려준다.
   // 같은 이름의 종목은 exercise_id가 달라도 한 종목으로 취급한다. 기간이 지난 기록도 DB에는 그대로 남아 있다.
-  // 기록 + 종목 이름을 한 번의 쿼리로 가져오고(N+1 없음) 서버에서 이름 기준으로 묶는다
-  async findMyRecentRecords(userId: string): Promise<RecentRecordsResponseDto> {
+  // 기록 + 종목 이름 + 공유한 그룹(record_shares)을 한 번의 쿼리로 가져오고(N+1 없음) 서버에서 이름 기준으로 묶는다
+  async findMyRecentRecords(
+    userId: string,
+    exerciseType?: string,
+  ): Promise<RecentRecordsResponseDto> {
     const { from, to } = getKstRecentRange(RECENT_DAYS);
+    // exerciseType이 있으면 trim 후 그 이름과 정확히 일치하는 종목의 기록만 (공백뿐이면 필터 없음)
+    const name = exerciseType?.trim();
 
     const records = await this.prisma.records.findMany({
-      where: { user_id: userId, record_date: { gte: from, lte: to } },
-      include: { exercises: { select: { name: true } } },
+      where: {
+        user_id: userId,
+        record_date: { gte: from, lte: to },
+        ...(name ? { exercises: { name } } : {}),
+      },
+      include: {
+        exercises: { select: { name: true } },
+        record_shares: {
+          select: { groups: { select: { id: true, name: true } } },
+          orderBy: { shared_at: 'asc' },
+        },
+      },
       orderBy: [{ record_date: 'desc' }, { created_at: 'desc' }],
     });
 
@@ -152,6 +167,10 @@ export class RecordsService {
         endImageUrl: record.end_image_url,
         recordDate: formatKstDate(record.record_date),
         createdAt: record.created_at,
+        sharedGroups: record.record_shares.map(({ groups }) => ({
+          groupId: groups.id,
+          groupName: groups.name,
+        })),
       });
       byName.set(exerciseType, group);
     }

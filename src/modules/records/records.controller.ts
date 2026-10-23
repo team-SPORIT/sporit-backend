@@ -117,8 +117,9 @@ export class RecordsController {
   @ApiOperation({ summary: '내 최근 7일 기록 조회 (종목별)' })
   findMyRecentRecords(
     @CurrentUser() user: { id: string; email: string },
+    @Query('exerciseType') exerciseType?: string,
   ): Promise<RecentRecordsResponseDto> {
-    return this.recordsService.findMyRecentRecords(user.id);
+    return this.recordsService.findMyRecentRecords(user.id, exerciseType);
   }
 
   // 기록 상세 조회 (본인 기록만)
