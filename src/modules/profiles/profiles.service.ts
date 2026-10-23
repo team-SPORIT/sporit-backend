@@ -8,6 +8,7 @@ import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../common/supabase/supabase.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { RECORD_IMAGES_BUCKET } from '../records/records.constants';
 import { MIME_TO_EXT, PROFILE_IMAGES_BUCKET } from './profiles.constants';
 
 @Injectable()
@@ -86,11 +87,15 @@ export class ProfilesService {
 
   // 회원 탈퇴 처리 순서:
   // 1. [DB 트랜잭션] 내가 그룹장인 그룹 정리 (여러 번 실행해도 안전: 위임/삭제가 끝난 그룹은 더 이상 내 그룹이 아니다)
-  // 2. Supabase 계정(auth.users) 삭제 -> profiles 이하 데이터는 DB의 CASCADE로 함께 삭제된다. 실패하면 500
+  // 2. Storage 삭제 대상(내 프로필/기록 사진) 경로를 미리 조회 (계정을 지우면 기록 정보가 사라지므로 삭제 전에 준비)
+  // 3. Supabase 계정(auth.users) 삭제 -> profiles 이하 데이터는 DB의 CASCADE로 함께 삭제된다. 실패하면 500
+  // 4. 계정 삭제가 성공한 뒤 Storage 사진 삭제. 실패해도 예외를 던지지 않고 경고 로그만 남긴다(탈퇴는 성공으로 응답)
   // 프로필이 이미 없는 경우(JWT는 유효하지만 계정/프로필이 없음)에도 에러 없이 성공으로 처리해 재시도해도 안전하다(멱등).
   async withdraw(userId: string) {
     await this.handleOwnedGroups(userId);
+    const storageTargets = await this.collectStorageTargets(userId);
     await this.deleteAuthUser(userId);
+    await this.cleanupStorage(userId, storageTargets);
   }
 
   // 내가 그룹장(owner_id)인 모든 그룹을 처리한다. 그룹장이 지워지면 groups가 CASCADE로 통째로 삭제되어
@@ -128,6 +133,82 @@ export class ProfilesService {
       // 그룹이 많은 경우를 고려해 기본 제한 시간(5초)보다 넉넉하게 둔다
       { timeout: 30_000 },
     );
+  }
+
+  // 삭제할 Storage 파일 경로를 버킷별로 조회한다. 조회에 실패해도 탈퇴를 막지 않고 경고만 남긴다.
+  // - profile-images: {userId}/ 폴더 (아바타)
+  // - record-images: records/{userId}/ 폴더 (기록 사진), 그리고 예전 업로드 규칙의 {userId}/ 폴더
+  private async collectStorageTargets(
+    userId: string,
+  ): Promise<{ bucket: string; paths: string[] }[]> {
+    const folders = [
+      { bucket: PROFILE_IMAGES_BUCKET, folder: userId },
+      { bucket: RECORD_IMAGES_BUCKET, folder: `records/${userId}` },
+      { bucket: RECORD_IMAGES_BUCKET, folder: userId },
+    ];
+
+    const targets: { bucket: string; paths: string[] }[] = [];
+    for (const { bucket, folder } of folders) {
+      try {
+        const paths = await this.listFolderFiles(bucket, folder);
+        if (paths.length > 0) targets.push({ bucket, paths });
+      } catch (error) {
+        this.logger.warn(
+          `Storage 목록 조회 실패 (bucket=${bucket}, userId=${userId}): ${this.errorMessage(error)}`,
+        );
+      }
+    }
+    return targets;
+  }
+
+  // 폴더 안의 파일 경로를 페이지 단위로 모두 조회한다 (폴더 항목은 id가 null이라 제외)
+  private async listFolderFiles(
+    bucket: string,
+    folder: string,
+  ): Promise<string[]> {
+    const storage = this.supabase.getClient().storage.from(bucket);
+    const pageSize = 100;
+    const paths: string[] = [];
+
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await storage.list(folder, {
+        limit: pageSize,
+        offset,
+        sortBy: { column: 'name', order: 'asc' },
+      });
+      if (error) throw error;
+
+      for (const item of data) {
+        if (item.id) paths.push(`${folder}/${item.name}`);
+      }
+      if (data.length < pageSize) break;
+    }
+    return paths;
+  }
+
+  // 계정 삭제 성공 후 Storage 사진을 지운다. 실패해도 예외를 던지지 않고 경고 로그만 남긴다
+  private async cleanupStorage(
+    userId: string,
+    targets: { bucket: string; paths: string[] }[],
+  ) {
+    const chunkSize = 100;
+    for (const { bucket, paths } of targets) {
+      const storage = this.supabase.getClient().storage.from(bucket);
+      for (let i = 0; i < paths.length; i += chunkSize) {
+        try {
+          const { error } = await storage.remove(paths.slice(i, i + chunkSize));
+          if (error) throw error;
+        } catch (error) {
+          this.logger.warn(
+            `Storage 파일 삭제 실패 (bucket=${bucket}, userId=${userId}): ${this.errorMessage(error)}`,
+          );
+        }
+      }
+    }
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   // 그룹 전용 종목(exercises.group_id)을 참조하는 기록과 종목 통계를 작성자별 "같은 이름의 개인 종목"으로 옮긴다.
