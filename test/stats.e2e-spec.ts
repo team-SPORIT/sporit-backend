@@ -26,7 +26,12 @@ interface WeeklyStats {
   totalSeconds: number;
   totalCount: number;
   days: { date: string; totalSeconds: number; count: number }[];
-  byExercise: { exerciseType: string; totalSeconds: number; count: number }[];
+  byExercise: {
+    exerciseId: string;
+    exerciseType: string;
+    totalSeconds: number;
+    count: number;
+  }[];
   previous: {
     weekStart: string;
     totalSeconds: number;
@@ -51,6 +56,9 @@ describe('주간 운동 통계 (e2e)', () => {
   let userAId: string;
   let userBId: string;
   let tokenA: string;
+  let runningId: bigint;
+  let yogaId: bigint;
+  let swimmingId: bigint;
 
   const today = getKstToday();
   const thisMonday = getKstWeekStart(today);
@@ -76,12 +84,12 @@ describe('주간 운동 통계 (e2e)', () => {
   function record(
     userId: string,
     date: Date,
-    exerciseType: string,
+    exerciseId: bigint,
     durationSec: number | null,
   ) {
     return {
       user_id: userId,
-      exercise_type: exerciseType,
+      exercise_id: exerciseId,
       duration_sec: durationSec,
       start_image_url: DUMMY_IMAGE_URL,
       end_image_url: DUMMY_IMAGE_URL,
@@ -91,6 +99,16 @@ describe('주간 운동 통계 (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
+
+    // 기본 종목(owner_id null)의 id 조회
+    const [running, yoga, swimming] = await Promise.all(
+      ['러닝', '요가', '수영'].map((name) =>
+        prisma.exercises.findFirstOrThrow({ where: { owner_id: null, name } }),
+      ),
+    );
+    runningId = running.id;
+    yogaId = yoga.id;
+    swimmingId = swimming.id;
 
     userAId = (await createTestUser(userA.email, userA.password)).id;
     userBId = (await createTestUser(userB.email, userB.password)).id;
@@ -109,27 +127,27 @@ describe('주간 운동 통계 (e2e)', () => {
         record(
           userAId,
           addDays(thisMonday, i),
-          '러닝',
+          runningId,
           THIS_WEEK_RUNNING_PER_DAY,
         ),
       ),
-      record(userAId, thisMonday, '요가', THIS_WEEK_YOGA_SECONDS),
-      record(userAId, thisMonday, '수영', null),
+      record(userAId, thisMonday, yogaId, THIS_WEEK_YOGA_SECONDS),
+      record(userAId, thisMonday, swimmingId, null),
       // 지난주: 월~일 매일 러닝, 월요일에는 시간 없는 요가
       ...Array.from({ length: 7 }, (_, i) =>
         record(
           userAId,
           addDays(lastMonday, i),
-          '러닝',
+          runningId,
           lastWeekRunningSeconds(i),
         ),
       ),
-      record(userAId, lastMonday, '요가', null),
+      record(userAId, lastMonday, yogaId, null),
       // 2주 전: 월요일 러닝 1000초
-      record(userAId, twoWeeksAgoMonday, '러닝', 1000),
+      record(userAId, twoWeeksAgoMonday, runningId, 1000),
       // 다른 유저(B)의 기록: A의 통계에 포함되면 안 된다
-      record(userBId, thisMonday, '러닝', 99999),
-      record(userBId, lastMonday, '러닝', 99999),
+      record(userBId, thisMonday, runningId, 99999),
+      record(userBId, lastMonday, runningId, 99999),
     ];
     await prisma.records.createMany({ data });
   });
@@ -173,16 +191,23 @@ describe('주간 운동 통계 (e2e)', () => {
 
     expect(body.byExercise).toEqual([
       {
+        exerciseId: yogaId.toString(),
         exerciseType: '요가',
         totalSeconds: THIS_WEEK_YOGA_SECONDS,
         count: 1,
       },
       {
+        exerciseId: runningId.toString(),
         exerciseType: '러닝',
         totalSeconds: THIS_WEEK_RUNNING_PER_DAY * (todayIndex + 1),
         count: todayIndex + 1,
       },
-      { exerciseType: '수영', totalSeconds: 0, count: 1 },
+      {
+        exerciseId: swimmingId.toString(),
+        exerciseType: '수영',
+        totalSeconds: 0,
+        count: 1,
+      },
     ]);
   });
 

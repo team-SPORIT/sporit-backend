@@ -78,7 +78,10 @@ describe('내 그룹 목록 최근 공유순 정렬 (e2e)', () => {
       groupIds.push((res.body as IdResponse).id);
     }
 
-    // Storage 업로드 없이 prisma로 기록을 직접 만든다
+    // Storage 업로드 없이 prisma로 기록을 직접 만든다 (기본 종목 '러닝' 사용)
+    const running = await prisma.exercises.findFirstOrThrow({
+      where: { owner_id: null, name: '러닝' },
+    });
     const recordDate = new Date();
     recordDate.setUTCHours(0, 0, 0, 0);
     const [record1, record2] = await Promise.all(
@@ -86,7 +89,7 @@ describe('내 그룹 목록 최근 공유순 정렬 (e2e)', () => {
         prisma.records.create({
           data: {
             user_id: userId,
-            exercise_type: '러닝',
+            exercise_id: running.id,
             start_image_url: DUMMY_IMAGE_URL,
             end_image_url: DUMMY_IMAGE_URL,
             record_date: recordDate,

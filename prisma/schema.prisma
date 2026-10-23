@@ -539,6 +539,7 @@ model profiles {
   created_at                                    DateTime              @default(now()) @db.Timestamptz(6)
   updated_at                                    DateTime              @default(now()) @db.Timestamptz(6)
   theme                                         theme_type            @default(blue)
+  exercises                                     exercises[]
   group_members                                 group_members[]
   groups                                        groups[]
   users                                         users                 @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -546,7 +547,6 @@ model profiles {
   record_reactions                              record_reactions[]
   records                                       records[]
   user_exercise_stats                           user_exercise_stats[]
-  user_exercises                                user_exercises[]
   wake_up_logs_wake_up_logs_sender_idToprofiles wake_up_logs[]        @relation("wake_up_logs_sender_idToprofiles")
   wake_up_logs_wake_up_logs_target_idToprofiles wake_up_logs[]        @relation("wake_up_logs_target_idToprofiles")
 
@@ -596,14 +596,15 @@ model record_shares {
 model records {
   id              BigInt          @id @default(autoincrement())
   user_id         String          @db.Uuid
-  exercise_type   String          @db.VarChar(30)
   duration_sec    Int?
   comment         String?         @db.VarChar(200)
   start_image_url String          @db.VarChar(500)
   record_date     DateTime        @db.Date
   created_at      DateTime        @default(now()) @db.Timestamptz(6)
   end_image_url   String          @db.VarChar
+  exercise_id     BigInt
   record_shares   record_shares[]
+  exercises       exercises       @relation(fields: [exercise_id], references: [id], onUpdate: NoAction)
   profiles        profiles        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([user_id, record_date], map: "idx_records_user_date")
@@ -612,24 +613,14 @@ model records {
 
 model user_exercise_stats {
   user_id       String    @db.Uuid
-  exercise_type String    @db.VarChar(30)
   total_seconds Int       @default(0)
   total_count   Int       @default(0)
   last_at       DateTime? @db.Timestamptz(6)
+  exercise_id   BigInt
+  exercises     exercises @relation(fields: [exercise_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   profiles      profiles  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@id([user_id, exercise_type])
-  @@schema("public")
-}
-
-model user_exercises {
-  id         BigInt   @id @default(autoincrement())
-  user_id    String   @db.Uuid
-  name       String   @db.VarChar(30)
-  created_at DateTime @default(now()) @db.Timestamptz(6)
-  profiles   profiles @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@unique([user_id, name])
+  @@id([user_id, exercise_id])
   @@schema("public")
 }
 
@@ -717,6 +708,19 @@ model scim_users {
   @@index([user_id])
   @@index([sso_provider_id, user_name, id], map: "scim_users_user_name_idx", where: raw("(deleted_at IS NULL)"))
   @@schema("auth")
+}
+
+model exercises {
+  id                  BigInt                @id @default(autoincrement())
+  name                String                @unique(map: "uq_exercises_default_name", where: raw("(owner_id IS NULL)")) @db.VarChar(30)
+  owner_id            String?               @db.Uuid
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  profiles            profiles?             @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  records             records[]
+  user_exercise_stats user_exercise_stats[]
+
+  @@unique([owner_id, name], map: "uq_exercises_owner_name", where: raw("(owner_id IS NOT NULL)"))
+  @@schema("public")
 }
 
 enum aal_level {

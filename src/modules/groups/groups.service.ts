@@ -151,6 +151,7 @@ export class GroupsService {
             profiles: {
               select: { id: true, nickname: true, profile_image: true },
             },
+            exercises: { select: { name: true } },
           },
         },
         _count: { select: { record_reactions: true, record_comments: true } },
@@ -173,7 +174,8 @@ export class GroupsService {
       records: shares.map((share) => ({
         shareId: share.id,
         recordId: share.record_id,
-        exerciseType: share.records.exercise_type,
+        exerciseId: share.records.exercise_id,
+        exerciseType: share.records.exercises.name,
         durationSec: share.records.duration_sec,
         comment: share.records.comment,
         startImageUrl: share.records.start_image_url,

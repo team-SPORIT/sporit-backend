@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import {
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -12,6 +13,11 @@ import { CreateRecordDto } from './dto/create-record.dto';
 import type { RecordImageFiles } from './pipes/record-images.pipe';
 import { MIME_TO_EXT, RECORD_IMAGES_BUCKET } from './records.constants';
 
+// 기록 응답에 종목 이름을 함께 내려주기 위한 include
+const RECORD_EXERCISE_INCLUDE = {
+  exercises: { select: { name: true } },
+} as const;
+
 @Injectable()
 export class RecordsService {
   constructor(
@@ -23,6 +29,10 @@ export class RecordsService {
   // 이미지 2장(시작/종료)은 트랜잭션 밖(외부 스토리지)에서 먼저 업로드하고, 기록 생성 + 종목 통계 upsert는 하나의 트랜잭션으로 묶는다
   // DB 저장이 실패하면 이미 올라간 이미지 2장을 지워 고아 파일을 남기지 않는다
   async create(userId: string, dto: CreateRecordDto, files: RecordImageFiles) {
+    // 이미지 업로드 전에 종목부터 검증해 불필요한 업로드를 막는다
+    const exerciseId = BigInt(dto.exerciseId);
+    await this.assertUsableExercise(userId, exerciseId);
+
     const { startPath, endPath, startImageUrl, endImageUrl } =
       await this.uploadRecordImages(userId, files);
     const recordDate = getKstToday();
@@ -31,6 +41,7 @@ export class RecordsService {
       return await this.createRecordInTransaction(
         userId,
         dto,
+        exerciseId,
         recordDate,
         startImageUrl,
         endImageUrl,
@@ -44,6 +55,7 @@ export class RecordsService {
   private createRecordInTransaction(
     userId: string,
     dto: CreateRecordDto,
+    exerciseId: bigint,
     recordDate: Date,
     startImageUrl: string,
     endImageUrl: string,
@@ -52,24 +64,42 @@ export class RecordsService {
       const record = await tx.records.create({
         data: {
           user_id: userId,
-          exercise_type: dto.exerciseType,
+          exercise_id: exerciseId,
           duration_sec: dto.durationSec,
           comment: dto.comment,
           start_image_url: startImageUrl,
           end_image_url: endImageUrl,
           record_date: recordDate,
         },
+        include: RECORD_EXERCISE_INCLUDE,
       });
 
-      await this.upsertExerciseStats(
-        tx,
-        userId,
-        dto.exerciseType,
-        dto.durationSec,
-      );
+      await this.upsertExerciseStats(tx, userId, exerciseId, dto.durationSec);
 
-      return record;
+      return this.toRecordResponse(record);
     });
+  }
+
+  // 종목 사용 가능 여부 검증: 없으면 404, 남의 개인 종목이면 403 (기본 종목 또는 내 종목만 허용)
+  private async assertUsableExercise(userId: string, exerciseId: bigint) {
+    const exercise = await this.prisma.exercises.findUnique({
+      where: { id: exerciseId },
+      select: { owner_id: true },
+    });
+    if (!exercise) {
+      throw new NotFoundException('종목을 찾을 수 없습니다.');
+    }
+    if (exercise.owner_id !== null && exercise.owner_id !== userId) {
+      throw new ForbiddenException('사용할 수 없는 종목입니다.');
+    }
+  }
+
+  // 응답에 종목 이름(exercise_type)을 평탄화해서 내려준다 (exercise_id는 기록 행에 그대로 포함)
+  private toRecordResponse<T extends { exercises: { name: string } }>(
+    record: T,
+  ) {
+    const { exercises, ...rest } = record;
+    return { ...rest, exercise_type: exercises.name };
   }
 
   // 내 월별 기록 조회 (캘린더용), 날짜순 정렬
@@ -77,24 +107,30 @@ export class RecordsService {
     const startDate = new Date(Date.UTC(year, month - 1, 1));
     const endDate = new Date(Date.UTC(year, month, 1));
 
-    return this.prisma.records.findMany({
+    const records = await this.prisma.records.findMany({
       where: {
         user_id: userId,
         record_date: { gte: startDate, lt: endDate },
       },
+      include: RECORD_EXERCISE_INCLUDE,
       orderBy: { record_date: 'asc' },
     });
+
+    return records.map((record) => this.toRecordResponse(record));
   }
 
   // 기록 상세 조회 (본인 기록만)
   async findOne(userId: string, id: bigint) {
-    const record = await this.prisma.records.findUnique({ where: { id } });
+    const record = await this.prisma.records.findUnique({
+      where: { id },
+      include: RECORD_EXERCISE_INCLUDE,
+    });
 
     if (!record || record.user_id !== userId) {
       throw new NotFoundException('기록을 찾을 수 없습니다.');
     }
 
-    return record;
+    return this.toRecordResponse(record);
   }
 
   // 기록 삭제 (본인 기록만)
@@ -181,16 +217,16 @@ export class RecordsService {
   private async upsertExerciseStats(
     tx: Prisma.TransactionClient,
     userId: string,
-    exerciseType: string,
+    exerciseId: bigint,
     durationSec?: number,
   ) {
     await tx.user_exercise_stats.upsert({
       where: {
-        user_id_exercise_type: { user_id: userId, exercise_type: exerciseType },
+        user_id_exercise_id: { user_id: userId, exercise_id: exerciseId },
       },
       create: {
         user_id: userId,
-        exercise_type: exerciseType,
+        exercise_id: exerciseId,
         total_seconds: durationSec ?? 0,
         total_count: 1,
         last_at: new Date(),

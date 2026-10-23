@@ -30,6 +30,8 @@ interface GroupDetailResponse {
 
 interface RecordResponse {
   id: string;
+  exercise_id: string;
+  exercise_type: string;
   duration_sec: number;
   start_image_url: string;
   end_image_url: string;
@@ -37,6 +39,8 @@ interface RecordResponse {
 
 interface FeedShare {
   author: { id: string };
+  exerciseId: string;
+  exerciseType: string;
   durationSec: number | null;
   startImageUrl: string;
   endImageUrl: string;
@@ -69,6 +73,8 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
   let groupId: string;
   let inviteCode: string;
   let recordId: string;
+  let runningId: string;
+  let yogaId: string;
   const extraUserIds: string[] = [];
 
   beforeAll(async () => {
@@ -78,6 +84,15 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     const createdB = await createTestUser(userB.email, userB.password);
     userAId = createdA.id;
     userBId = createdB.id;
+
+    // 기본 종목(owner_id null)의 id를 조회해서 사용한다
+    const [running, yoga] = await Promise.all(
+      ['러닝', '요가'].map((name) =>
+        prisma.exercises.findFirstOrThrow({ where: { owner_id: null, name } }),
+      ),
+    );
+    runningId = running.id.toString();
+    yogaId = yoga.id.toString();
 
     tokenA = await getAccessToken(userA.email, userA.password);
     tokenB = await getAccessToken(userB.email, userB.password);
@@ -197,7 +212,7 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/records')
       .set('Authorization', `Bearer ${tokenA}`)
-      .field('exerciseType', '러닝')
+      .field('exerciseId', runningId)
       .field('durationSec', '1800')
       .attach('startFile', TEST_IMAGE_PATH)
       .attach('endFile', TEST_IMAGE_PATH)
@@ -205,6 +220,8 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
 
     const body = res.body as RecordResponse;
     expect(body.id).toBeDefined();
+    expect(body.exercise_id).toBe(runningId);
+    expect(body.exercise_type).toBe('러닝');
     expect(body.duration_sec).toBe(1800);
     expect(body.start_image_url).toEqual(expect.any(String));
     expect(body.end_image_url).toEqual(expect.any(String));
@@ -215,7 +232,10 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
   it('5-2. 기록 생성 후 user_exercise_stats.total_seconds가 durationSec만큼 증가한다', async () => {
     const stats = await prisma.user_exercise_stats.findUnique({
       where: {
-        user_id_exercise_type: { user_id: userAId, exercise_type: '러닝' },
+        user_id_exercise_id: {
+          user_id: userAId,
+          exercise_id: BigInt(runningId),
+        },
       },
     });
 
@@ -228,7 +248,7 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       await request(app.getHttpServer())
         .post('/records')
         .set('Authorization', `Bearer ${tokenA}`)
-        .field('exerciseType', '러닝')
+        .field('exerciseId', runningId)
         .field('durationSec', durationSec)
         .attach('startFile', TEST_IMAGE_PATH)
         .attach('endFile', TEST_IMAGE_PATH)
@@ -240,14 +260,14 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     await request(app.getHttpServer())
       .post('/records')
       .set('Authorization', `Bearer ${tokenA}`)
-      .field('exerciseType', '러닝')
+      .field('exerciseId', runningId)
       .attach('startFile', TEST_IMAGE_PATH)
       .expect(400);
 
     await request(app.getHttpServer())
       .post('/records')
       .set('Authorization', `Bearer ${tokenA}`)
-      .field('exerciseType', '러닝')
+      .field('exerciseId', runningId)
       .attach('endFile', TEST_IMAGE_PATH)
       .expect(400);
   });
@@ -273,7 +293,7 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     const recordRes = await request(app.getHttpServer())
       .post('/records')
       .set('Authorization', `Bearer ${tokenB}`)
-      .field('exerciseType', '요가')
+      .field('exerciseId', yogaId)
       .field('durationSec', '1200')
       .attach('startFile', TEST_IMAGE_PATH)
       .attach('endFile', TEST_IMAGE_PATH)
@@ -300,6 +320,14 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     expect(body.records.map((record) => record.durationSec).sort()).toEqual([
       1200, 1800,
     ]);
+    expect(
+      body.records.map((record) => [record.exerciseId, record.exerciseType]),
+    ).toEqual(
+      expect.arrayContaining([
+        [runningId, '러닝'],
+        [yogaId, '요가'],
+      ]),
+    );
     for (const record of body.records) {
       expect(record.startImageUrl).toEqual(expect.any(String));
       expect(record.endImageUrl).toEqual(expect.any(String));

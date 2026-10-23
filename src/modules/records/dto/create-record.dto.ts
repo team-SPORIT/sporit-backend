@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   IsInt,
   IsNotEmpty,
+  IsNumberString,
   IsOptional,
   IsString,
   Max,
@@ -12,11 +13,13 @@ import {
 
 // 운동 기록 생성용 DTO (multipart/form-data의 텍스트 필드)
 export class CreateRecordDto {
-  @ApiProperty({ description: '운동 종류', maxLength: 30 })
-  @IsString()
+  @ApiProperty({
+    description: '종목 ID (기본 종목 또는 내 종목)',
+    type: String,
+  })
   @IsNotEmpty()
-  @MaxLength(30)
-  exerciseType: string;
+  @IsNumberString({ no_symbols: true })
+  exerciseId: string;
 
   @ApiPropertyOptional({
     description: '운동 시간(초)',
