@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -21,6 +22,8 @@ import {
 import { GroupsService } from './groups.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
+import { GroupExercisesResponseDto } from './dto/group-exercises-response.dto';
+import { SetGroupExercisesDto } from './dto/set-group-exercises.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
 import {
   GroupDetailResponseDto,
@@ -80,6 +83,31 @@ export class GroupsController {
     @Param('id') id: string,
   ) {
     return this.groupsService.findOne(user.id, this.toBigIntId(id));
+  }
+
+  // 그룹 허용 종목 조회 (멤버만 가능)
+  @Get(':id/exercises')
+  @ApiOperation({ summary: '그룹 허용 종목 조회' })
+  getExercises(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+  ): Promise<GroupExercisesResponseDto> {
+    return this.groupsService.getExercises(user.id, this.toBigIntId(id));
+  }
+
+  // 그룹 허용 종목 전체 교체 (그룹장만, 빈 배열이면 제한 없음)
+  @Put(':id/exercises')
+  @ApiOperation({ summary: '그룹 허용 종목 설정 (전체 교체)' })
+  setExercises(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+    @Body() setGroupExercisesDto: SetGroupExercisesDto,
+  ): Promise<GroupExercisesResponseDto> {
+    return this.groupsService.setExercises(
+      user.id,
+      this.toBigIntId(id),
+      setGroupExercisesDto,
+    );
   }
 
   // 그룹 피드 조회 (멤버만, 오늘 공유 전이면 잠금)

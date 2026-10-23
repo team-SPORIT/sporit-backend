@@ -16,6 +16,8 @@ import {
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
+import { GroupExercisesResponseDto } from './dto/group-exercises-response.dto';
+import { SetGroupExercisesDto } from './dto/set-group-exercises.dto';
 
 const INVITE_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const INVITE_CODE_LENGTH = 8;
@@ -117,6 +119,87 @@ export class GroupsService {
         },
       },
     });
+  }
+
+  // 그룹 허용 종목 조회 (멤버만 가능). 허용 종목 행이 없으면 제한 없음(restricted=false)
+  async getExercises(
+    userId: string,
+    groupId: bigint,
+  ): Promise<GroupExercisesResponseDto> {
+    const membership = await this.prisma.group_members.findUnique({
+      where: { group_id_user_id: { group_id: groupId, user_id: userId } },
+    });
+    if (!membership) {
+      throw new ForbiddenException('그룹 멤버만 조회할 수 있습니다.');
+    }
+
+    return this.findGroupExercises(this.prisma, groupId);
+  }
+
+  // 그룹 허용 종목 전체 교체 (그룹장만). 기존 행을 지우고 새로 만들며, 빈 배열이면 제한 없음.
+  // 허용 종목은 기본 종목(owner_id null)만 가능: 없는 ID이거나 개인 종목이 섞여 있으면 400
+  async setExercises(
+    userId: string,
+    groupId: bigint,
+    dto: SetGroupExercisesDto,
+  ): Promise<GroupExercisesResponseDto> {
+    const group = await this.prisma.groups.findUnique({
+      where: { id: groupId },
+      select: { owner_id: true },
+    });
+    if (!group) {
+      throw new NotFoundException('그룹을 찾을 수 없습니다.');
+    }
+    if (group.owner_id !== userId) {
+      throw new ForbiddenException('그룹장만 허용 종목을 설정할 수 있습니다.');
+    }
+
+    const exerciseIds = [...new Set(dto.exerciseIds.map((id) => BigInt(id)))];
+    if (exerciseIds.length > 0) {
+      const defaultCount = await this.prisma.exercises.count({
+        where: { id: { in: exerciseIds }, owner_id: null },
+      });
+      if (defaultCount !== exerciseIds.length) {
+        throw new BadRequestException(
+          '존재하지 않거나 기본 종목이 아닌 종목이 포함되어 있습니다.',
+        );
+      }
+    }
+
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.group_exercises.deleteMany({ where: { group_id: groupId } });
+      await tx.group_exercises.createMany({
+        data: exerciseIds.map((exerciseId) => ({
+          group_id: groupId,
+          exercise_id: exerciseId,
+        })),
+      });
+
+      return this.findGroupExercises(tx, groupId);
+    });
+  }
+
+  // 그룹 허용 종목 조회 (id순). 행이 없으면 restricted=false
+  private async findGroupExercises(
+    client: Prisma.TransactionClient | PrismaService,
+    groupId: bigint,
+  ): Promise<GroupExercisesResponseDto> {
+    const rows = await client.group_exercises.findMany({
+      where: { group_id: groupId },
+      include: {
+        exercises: { select: { id: true, name: true, owner_id: true } },
+      },
+      orderBy: { exercise_id: 'asc' },
+    });
+
+    return {
+      restricted: rows.length > 0,
+      exercises: rows.map(({ exercises }) => ({
+        id: exercises.id,
+        name: exercises.name,
+        isDefault: exercises.owner_id === null,
+      })),
+    };
   }
 
   // 그룹 피드 조회 (멤버만 가능): 내가 해당 날짜에 이 그룹에 공유하지 않았으면 잠금 처리
