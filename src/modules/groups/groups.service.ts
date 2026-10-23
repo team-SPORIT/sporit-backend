@@ -155,6 +155,16 @@ export class GroupsService {
       orderBy: { shared_at: 'asc' },
     });
 
+    // 내가 좋아요한 공유 ID를 한 번에 조회 (공유별 쿼리 방지)
+    const myReactions = await this.prisma.record_reactions.findMany({
+      where: {
+        user_id: userId,
+        share_id: { in: shares.map((share) => share.id) },
+      },
+      select: { share_id: true },
+    });
+    const likedShareIds = new Set(myReactions.map((r) => r.share_id));
+
     return {
       locked: false,
       records: shares.map((share) => ({
@@ -172,8 +182,9 @@ export class GroupsService {
           nickname: share.records.profiles.nickname,
           profileImage: share.records.profiles.profile_image,
         },
-        reactionCount: share._count.record_reactions,
+        likeCount: share._count.record_reactions,
         commentCount: share._count.record_comments,
+        likedByMe: likedShareIds.has(share.id),
       })),
     };
   }

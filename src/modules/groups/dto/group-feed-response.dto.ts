@@ -12,7 +12,7 @@ export class FeedAuthorDto {
   profileImage: string | null;
 }
 
-// 그룹 피드에 노출되는 공유 항목 (기록 + 작성자 + 리액션/댓글 수)
+// 그룹 피드에 노출되는 공유 항목 (기록 + 작성자 + 좋아요/댓글 수 + 내 좋아요 여부)
 // shareId/recordId는 BigInt (main.ts의 전역 toJSON에 의해 응답 시 문자열로 직렬화됨)
 export class FeedShareDto {
   @ApiProperty({ description: '공유 ID', type: String })
@@ -45,11 +45,14 @@ export class FeedShareDto {
   @ApiProperty({ description: '작성자 정보', type: FeedAuthorDto })
   author: FeedAuthorDto;
 
-  @ApiProperty({ description: '리액션 수' })
-  reactionCount: number;
+  @ApiProperty({ description: '좋아요 수' })
+  likeCount: number;
 
   @ApiProperty({ description: '댓글 수' })
   commentCount: number;
+
+  @ApiProperty({ description: '내가 좋아요를 눌렀는지 여부' })
+  likedByMe: boolean;
 }
 
 // 그룹 피드 응답 (잠금 상태면 records는 빈 배열)
