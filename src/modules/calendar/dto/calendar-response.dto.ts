@@ -15,5 +15,6 @@ export class CalendarDayDto {
 // 월별 캘린더 응답
 export class CalendarResponseDto {
   month: string;
+  startMonth: string;
   days: CalendarDayDto[];
 }

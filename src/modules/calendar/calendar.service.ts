@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   formatKstDate,
@@ -6,6 +10,7 @@ import {
   getKstMonthRange,
   getKstToday,
   parseKstMonth,
+  toKstDate,
 } from '../../common/utils/kst-date.util';
 import {
   CalendarDayDto,
@@ -17,7 +22,7 @@ export class CalendarService {
   constructor(private readonly prisma: PrismaService) {}
 
   // 월별 캘린더. month(YYYY-MM)가 없으면 KST 기준 이번 달, 형식이 틀리거나 월이 01~12가 아니면 400
-  // 해당 월 1일~말일(record_date 기준)에 내가 기록한 종목을 날짜별로 묶어서 내려준다 (기록이 있는 날만, 날짜 오름차순)
+  // startMonth(가입한 달)와 함께, 해당 월 1일~말일(record_date 기준)에 내가 기록한 종목을 날짜별로 묶어서 내려준다 (기록이 있는 날만, 날짜 오름차순)
   async getCalendar(
     userId: string,
     monthStr?: string,
@@ -31,6 +36,23 @@ export class CalendarService {
       );
     }
     const { from, to } = getKstMonthRange(parsed.year, parsed.month);
+    const month = formatKstMonth(from);
+
+    // 가입한 달(KST): profiles.created_at 기준
+    const profile = await this.prisma.profiles.findUnique({
+      where: { id: userId },
+      select: { created_at: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('프로필을 찾을 수 없습니다.');
+    }
+    const startMonth = formatKstMonth(toKstDate(profile.created_at));
+
+    // 가입 이전 달이나 아직 오지 않은 미래 달은 에러 없이 빈 days로 응답한다 (기록이 있을 수 없으므로 조회도 생략)
+    const currentMonth = formatKstMonth(getKstToday());
+    if (month < startMonth || month > currentMonth) {
+      return { month, startMonth, days: [] };
+    }
 
     // 필요한 컬럼(날짜, 생성 시각, 종목 이름)만 한 번의 쿼리로 가져온다. 먼저 기록한 종목이 먼저 오도록 created_at 오름차순
     const records = await this.prisma.records.findMany({
@@ -64,7 +86,8 @@ export class CalendarService {
     await this.attachCategories(userId, [...days.values()]);
 
     return {
-      month: formatKstMonth(from),
+      month,
+      startMonth,
       days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
     };
   }
