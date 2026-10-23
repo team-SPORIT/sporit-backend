@@ -116,29 +116,25 @@ describe('종목 (e2e)', () => {
     customIdB = (resB.body as ExerciseResponse).id;
   });
 
-  it('2. GET /exercises는 기본 종목 먼저, 그 뒤에 내 종목을 내려주고 남의 종목은 없다', async () => {
+  it('2. 선택 목록(GET /exercises/selectable)에서 내 개인 종목은 mine에 나오고 남의 종목은 없다', async () => {
     const res = await request(server())
-      .get('/exercises')
+      .get('/exercises/selectable')
       .set(authOf(users.a))
       .expect(200);
-    const list = res.body as ExerciseResponse[];
+    const body = res.body as {
+      defaults: ExerciseResponse[];
+      mine: ExerciseResponse[];
+    };
 
-    const defaults = list.filter((exercise) => exercise.isDefault);
-    const mine = list.filter((exercise) => !exercise.isDefault);
-
-    expect(defaults.length).toBeGreaterThan(0);
-    expect(defaults.every((exercise) => exercise.owner_id === null)).toBe(true);
-    expect(defaults.map((exercise) => exercise.name)).toContain('러닝');
-    expect(mine.map((exercise) => exercise.id)).toEqual([customIdA]);
-    expect(list.map((exercise) => exercise.id)).not.toContain(customIdB);
-
-    // 기본 종목이 모두 내 종목보다 앞에 오고, 각각 id 오름차순이다
-    expect(list.slice(0, defaults.length)).toEqual(defaults);
-    const defaultIds = defaults.map((exercise) => BigInt(exercise.id));
-    expect(defaultIds).toEqual([...defaultIds].sort((a, b) => Number(a - b)));
+    expect(body.mine.map((exercise) => exercise.id)).toEqual([customIdA]);
+    expect(body.mine.every((exercise) => !exercise.isDefault)).toBe(true);
+    expect(body.defaults.map((exercise) => exercise.name)).toContain('러닝');
+    expect(body.defaults.every((exercise) => exercise.isDefault)).toBe(true);
+    expect(body.mine.map((exercise) => exercise.id)).not.toContain(customIdB);
   });
 
-  it('3. 기존 GET /exercises/me는 더 이상 없다', async () => {
+  it('3. 종목 전체 목록 GET /exercises와 GET /exercises/me는 없다', async () => {
+    await request(server()).get('/exercises').set(authOf(users.a)).expect(404);
     await request(server())
       .get('/exercises/me')
       .set(authOf(users.a))
@@ -222,10 +218,15 @@ describe('종목 (e2e)', () => {
       .set(authOf(users.b))
       .expect(204);
 
-    const list = (
-      await request(server()).get('/exercises').set(authOf(users.b)).expect(200)
-    ).body as ExerciseResponse[];
-    expect(list.map((exercise) => exercise.id)).not.toContain(customIdB);
+    const selectable = (
+      await request(server())
+        .get('/exercises/selectable')
+        .set(authOf(users.b))
+        .expect(200)
+    ).body as { mine: ExerciseResponse[] };
+    expect(selectable.mine.map((exercise) => exercise.id)).not.toContain(
+      customIdB,
+    );
   });
 
   it('10. 주간 통계 byExercise는 exercise_id 기준이라 이름이 같아도 id가 다르면 따로 집계한다', async () => {

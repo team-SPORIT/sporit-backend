@@ -37,18 +37,6 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class ExercisesController {
   constructor(private readonly exercisesService: ExercisesService) {}
 
-  // 종목 목록 조회 (기본 종목 + 내 종목)
-  @Get()
-  @ApiOperation({
-    summary: '종목 목록 조회 (기본 종목 + 내 종목)',
-    description:
-      '기본 종목 먼저(id순), 내 종목은 등록순. isDefault로 구분한다.',
-  })
-  @ApiOkResponse({ type: ExerciseResponseDto, isArray: true })
-  findAll(@CurrentUser() user: { id: string; email: string }) {
-    return this.exercisesService.findAll(user.id);
-  }
-
   // 기록 작성 화면용 선택 목록 (내 개인 종목 + 제한 있는 그룹의 허용 종목)
   @Get('selectable')
   @ApiOperation({
