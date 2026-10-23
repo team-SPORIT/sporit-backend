@@ -11,16 +11,38 @@ const adminClient = createClient(supabaseUrl, serviceRoleKey);
 // 일반 클라이언트: 실제 로그인 흐름 재현용 (anon 또는 service_role)
 const authClient = createClient(supabaseUrl, publicKey);
 
+// Supabase Auth는 짧은 시간에 요청이 몰리면 "Request rate limit reached"를 돌려준다.
+// E2E 스위트가 병렬로 많은 유저를 만들고 로그인하므로, 이 에러일 때만 잠시 기다렸다가 재시도한다
+const RATE_LIMIT_RETRIES = 6;
+
+async function withRateLimitRetry<
+  T extends { error: { message: string } | null },
+>(call: () => Promise<T>): Promise<T> {
+  let result = await call();
+  for (
+    let attempt = 1;
+    attempt <= RATE_LIMIT_RETRIES &&
+    result.error?.message.toLowerCase().includes('rate limit');
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+    result = await call();
+  }
+  return result;
+}
+
 // 이메일/비번으로 테스트 유저 생성 (email_confirm: true로 즉시 로그인 가능하게)
 export async function createTestUser(
   email: string,
   password: string,
 ): Promise<{ id: string; email: string }> {
-  const { data, error } = await adminClient.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
+  const { data, error } = await withRateLimitRetry(() =>
+    adminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    }),
+  );
 
   if (error || !data.user) {
     throw new Error(
@@ -36,10 +58,9 @@ export async function getAccessToken(
   email: string,
   password: string,
 ): Promise<string> {
-  const { data, error } = await authClient.auth.signInWithPassword({
-    email,
-    password,
-  });
+  const { data, error } = await withRateLimitRetry(() =>
+    authClient.auth.signInWithPassword({ email, password }),
+  );
 
   if (error || !data.session) {
     throw new Error(

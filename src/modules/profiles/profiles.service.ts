@@ -1,15 +1,20 @@
 import {
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../common/supabase/supabase.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { RECORD_IMAGES_BUCKET } from '../records/records.constants';
 import { MIME_TO_EXT, PROFILE_IMAGES_BUCKET } from './profiles.constants';
 
 @Injectable()
 export class ProfilesService {
+  private readonly logger = new Logger(ProfilesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabase: SupabaseService,
@@ -78,6 +83,263 @@ export class ProfilesService {
       where: { id: userId },
       data: { profile_image: publicUrlData.publicUrl },
     });
+  }
+
+  // 회원 탈퇴 처리 순서:
+  // 1. [DB 트랜잭션] 내가 그룹장인 그룹 정리 (여러 번 실행해도 안전: 위임/삭제가 끝난 그룹은 더 이상 내 그룹이 아니다)
+  // 2. Storage 삭제 대상(내 프로필/기록 사진) 경로를 미리 조회 (계정을 지우면 기록 정보가 사라지므로 삭제 전에 준비)
+  // 3. Supabase 계정(auth.users) 삭제 -> profiles 이하 데이터는 DB의 CASCADE로 함께 삭제된다. 실패하면 500
+  // 4. 계정 삭제가 성공한 뒤 Storage 사진 삭제. 실패해도 예외를 던지지 않고 경고 로그만 남긴다(탈퇴는 성공으로 응답)
+  // 프로필이 이미 없는 경우(JWT는 유효하지만 계정/프로필이 없음)에도 에러 없이 성공으로 처리해 재시도해도 안전하다(멱등).
+  async withdraw(userId: string) {
+    await this.handleOwnedGroups(userId);
+    const storageTargets = await this.collectStorageTargets(userId);
+    await this.deleteAuthUser(userId);
+    await this.cleanupStorage(userId, storageTargets);
+  }
+
+  // 내가 그룹장(owner_id)인 모든 그룹을 처리한다. 그룹장이 지워지면 groups가 CASCADE로 통째로 삭제되어
+  // 다른 멤버의 공유/댓글까지 사라지므로, 계정을 지우기 전에 먼저 처리해야 한다.
+  // - 다른 멤버가 있으면: 가장 먼저 가입한 멤버(joined_at 오름차순, 같으면 user_id 오름차순)에게 그룹장을 위임
+  // - 나 혼자뿐이면: 그룹 삭제
+  private async handleOwnedGroups(userId: string) {
+    await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const ownedGroups = await tx.groups.findMany({
+          where: { owner_id: userId },
+          select: { id: true },
+        });
+
+        for (const { id: groupId } of ownedGroups) {
+          const nextOwner = await tx.group_members.findFirst({
+            where: { group_id: groupId, user_id: { not: userId } },
+            orderBy: [{ joined_at: 'asc' }, { user_id: 'asc' }],
+            select: { user_id: true },
+          });
+
+          if (nextOwner) {
+            await tx.groups.update({
+              where: { id: groupId },
+              data: { owner_id: nextOwner.user_id },
+            });
+          } else {
+            // 그룹 전용 종목은 그룹 삭제 시 함께 지워지는데 기록이 참조 중이면(RESTRICT) 삭제가 막히므로
+            // 먼저 기록/통계를 작성자의 개인 종목으로 옮긴다
+            await this.migrateGroupExercisesToPersonal(tx, groupId);
+            await tx.groups.delete({ where: { id: groupId } });
+          }
+        }
+      },
+      // 그룹이 많은 경우를 고려해 기본 제한 시간(5초)보다 넉넉하게 둔다
+      { timeout: 30_000 },
+    );
+  }
+
+  // 삭제할 Storage 파일 경로를 버킷별로 조회한다. 조회에 실패해도 탈퇴를 막지 않고 경고만 남긴다.
+  // - profile-images: {userId}/ 폴더 (아바타)
+  // - record-images: records/{userId}/ 폴더 (기록 사진), 그리고 예전 업로드 규칙의 {userId}/ 폴더
+  private async collectStorageTargets(
+    userId: string,
+  ): Promise<{ bucket: string; paths: string[] }[]> {
+    const folders = [
+      { bucket: PROFILE_IMAGES_BUCKET, folder: userId },
+      { bucket: RECORD_IMAGES_BUCKET, folder: `records/${userId}` },
+      { bucket: RECORD_IMAGES_BUCKET, folder: userId },
+    ];
+
+    const targets: { bucket: string; paths: string[] }[] = [];
+    for (const { bucket, folder } of folders) {
+      try {
+        const paths = await this.listFolderFiles(bucket, folder);
+        if (paths.length > 0) targets.push({ bucket, paths });
+      } catch (error) {
+        this.logger.warn(
+          `Storage 목록 조회 실패 (bucket=${bucket}, userId=${userId}): ${this.errorMessage(error)}`,
+        );
+      }
+    }
+    return targets;
+  }
+
+  // 폴더 안의 파일 경로를 페이지 단위로 모두 조회한다 (폴더 항목은 id가 null이라 제외)
+  private async listFolderFiles(
+    bucket: string,
+    folder: string,
+  ): Promise<string[]> {
+    const storage = this.supabase.getClient().storage.from(bucket);
+    const pageSize = 100;
+    const paths: string[] = [];
+
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await storage.list(folder, {
+        limit: pageSize,
+        offset,
+        sortBy: { column: 'name', order: 'asc' },
+      });
+      if (error) throw error;
+
+      for (const item of data) {
+        if (item.id) paths.push(`${folder}/${item.name}`);
+      }
+      if (data.length < pageSize) break;
+    }
+    return paths;
+  }
+
+  // 계정 삭제 성공 후 Storage 사진을 지운다. 실패해도 예외를 던지지 않고 경고 로그만 남긴다
+  private async cleanupStorage(
+    userId: string,
+    targets: { bucket: string; paths: string[] }[],
+  ) {
+    const chunkSize = 100;
+    for (const { bucket, paths } of targets) {
+      const storage = this.supabase.getClient().storage.from(bucket);
+      for (let i = 0; i < paths.length; i += chunkSize) {
+        try {
+          const { error } = await storage.remove(paths.slice(i, i + chunkSize));
+          if (error) throw error;
+        } catch (error) {
+          this.logger.warn(
+            `Storage 파일 삭제 실패 (bucket=${bucket}, userId=${userId}): ${this.errorMessage(error)}`,
+          );
+        }
+      }
+    }
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  // 그룹 전용 종목(exercises.group_id)을 참조하는 기록과 종목 통계를 작성자별 "같은 이름의 개인 종목"으로 옮긴다.
+  // 작성자에게 같은 이름의 개인 종목이 없으면 새로 만든다. 탈퇴하는 그룹장 본인의 기록도 같은 방식으로 옮긴다
+  // (계정 삭제가 실패해 재시도하는 경우에도 데이터가 먼저 사라지지 않도록 기록을 삭제하지 않고 이관한다).
+  // 통계는 작성자에게 같은 이름의 개인 종목 통계가 이미 있으면 합산(total_seconds, total_count)하고 last_at은 더 최근 값을 쓴다.
+  private async migrateGroupExercisesToPersonal(
+    tx: Prisma.TransactionClient,
+    groupId: bigint,
+  ) {
+    const groupExercises = await tx.exercises.findMany({
+      where: { group_id: groupId },
+      select: { id: true, name: true },
+    });
+    if (groupExercises.length === 0) return;
+
+    const exerciseIds = groupExercises.map((exercise) => exercise.id);
+    const nameById = new Map(
+      groupExercises.map((exercise) => [exercise.id, exercise.name]),
+    );
+
+    // 이 종목들을 쓴 (작성자, 종목) 조합: 기록 또는 통계가 있는 모든 경우
+    const usedByRecords = await tx.records.findMany({
+      where: { exercise_id: { in: exerciseIds } },
+      select: { user_id: true, exercise_id: true },
+      distinct: ['user_id', 'exercise_id'],
+    });
+    const stats = await tx.user_exercise_stats.findMany({
+      where: { exercise_id: { in: exerciseIds } },
+    });
+    const pairs = new Map<string, { userId: string; exerciseId: bigint }>();
+    for (const { user_id, exercise_id } of [...usedByRecords, ...stats]) {
+      pairs.set(`${user_id}:${exercise_id}`, {
+        userId: user_id,
+        exerciseId: exercise_id,
+      });
+    }
+
+    for (const { userId, exerciseId } of pairs.values()) {
+      const name = nameById.get(exerciseId)!;
+      const personalId = await this.findOrCreatePersonalExercise(
+        tx,
+        userId,
+        name,
+      );
+
+      await tx.records.updateMany({
+        where: { user_id: userId, exercise_id: exerciseId },
+        data: { exercise_id: personalId },
+      });
+
+      const source = stats.find(
+        (row) => row.user_id === userId && row.exercise_id === exerciseId,
+      );
+      if (!source) continue;
+
+      const target = await tx.user_exercise_stats.findUnique({
+        where: {
+          user_id_exercise_id: { user_id: userId, exercise_id: personalId },
+        },
+      });
+      if (target) {
+        await tx.user_exercise_stats.update({
+          where: {
+            user_id_exercise_id: { user_id: userId, exercise_id: personalId },
+          },
+          data: {
+            total_seconds: target.total_seconds + source.total_seconds,
+            total_count: target.total_count + source.total_count,
+            last_at: this.latest(target.last_at, source.last_at),
+          },
+        });
+        await tx.user_exercise_stats.delete({
+          where: {
+            user_id_exercise_id: { user_id: userId, exercise_id: exerciseId },
+          },
+        });
+      } else {
+        await tx.user_exercise_stats.update({
+          where: {
+            user_id_exercise_id: { user_id: userId, exercise_id: exerciseId },
+          },
+          data: { exercise_id: personalId },
+        });
+      }
+    }
+  }
+
+  // 작성자의 같은 이름 개인 종목을 찾고, 없으면 만든다
+  private async findOrCreatePersonalExercise(
+    tx: Prisma.TransactionClient,
+    ownerId: string,
+    name: string,
+  ): Promise<bigint> {
+    const existing = await tx.exercises.findFirst({
+      where: { owner_id: ownerId, name },
+      select: { id: true },
+    });
+    if (existing) return existing.id;
+
+    const created = await tx.exercises.create({
+      data: { owner_id: ownerId, name },
+      select: { id: true },
+    });
+    return created.id;
+  }
+
+  // 두 시각 중 더 최근 값 (null이면 다른 쪽)
+  private latest(a: Date | null, b: Date | null): Date | null {
+    if (!a) return b;
+    if (!b) return a;
+    return a > b ? a : b;
+  }
+
+  // Supabase 계정 삭제(service_role). 이미 없는 계정이면 성공으로 보고, 그 외 실패는 500으로 던져 탈퇴 실패를 알린다
+  private async deleteAuthUser(userId: string) {
+    const { error } = await this.supabase
+      .getClient()
+      .auth.admin.deleteUser(userId);
+
+    if (!error) return;
+
+    if (error.status === 404 || error.code === 'user_not_found') {
+      return; // 이미 삭제된 계정 -> 멱등하게 성공 처리
+    }
+
+    // 토큰 등 민감 정보는 로그에 남기지 않고 상태/코드만 남긴다
+    this.logger.error(
+      `계정 삭제 실패 (userId=${userId}, status=${error.status}, code=${error.code})`,
+    );
+    throw new InternalServerErrorException('회원 탈퇴에 실패했습니다.');
   }
 
   // profile_image의 public URL에서 버킷 내부 경로(path)를 추출
