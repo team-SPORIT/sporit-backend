@@ -10,9 +10,20 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ExercisesService } from './exercises.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
+import { ExerciseResponseDto } from './dto/exercise-response.dto';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -25,7 +36,12 @@ export class ExercisesController {
 
   // 종목 목록 조회 (기본 종목 + 내 종목)
   @Get()
-  @ApiOperation({ summary: '종목 목록 조회 (기본 종목 + 내 종목)' })
+  @ApiOperation({
+    summary: '종목 목록 조회 (기본 종목 + 내 종목)',
+    description:
+      '기본 종목 먼저(id순), 내 종목은 등록순. isDefault로 구분한다.',
+  })
+  @ApiOkResponse({ type: ExerciseResponseDto, isArray: true })
   findAll(@CurrentUser() user: { id: string; email: string }) {
     return this.exercisesService.findAll(user.id);
   }
@@ -33,6 +49,10 @@ export class ExercisesController {
   // 개인 종목 추가
   @Post()
   @ApiOperation({ summary: '개인 종목 추가' })
+  @ApiCreatedResponse({ type: ExerciseResponseDto })
+  @ApiConflictResponse({
+    description: '같은 이름의 기본 종목이 있거나 내 종목에 이미 있음',
+  })
   create(
     @CurrentUser() user: { id: string; email: string },
     @Body() createExerciseDto: CreateExerciseDto,
@@ -44,6 +64,10 @@ export class ExercisesController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: '개인 종목 삭제' })
+  @ApiNoContentResponse({ description: '삭제 완료' })
+  @ApiForbiddenResponse({ description: '기본 종목이거나 남의 종목' })
+  @ApiNotFoundResponse({ description: '종목을 찾을 수 없음' })
+  @ApiConflictResponse({ description: '기록이 있는 종목은 삭제할 수 없음' })
   remove(
     @CurrentUser() user: { id: string; email: string },
     @Param('id') id: string,

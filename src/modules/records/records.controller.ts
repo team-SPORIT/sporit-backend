@@ -20,6 +20,10 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
@@ -27,6 +31,7 @@ import {
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateRecordDto } from './dto/create-record.dto';
+import { RecordResponseDto } from './dto/record-response.dto';
 import {
   type RecordImageFiles,
   RecordImagesPipe,
@@ -50,10 +55,13 @@ export class RecordsController {
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: '운동 기록 작성' })
+  @ApiCreatedResponse({ type: RecordResponseDto })
+  @ApiNotFoundResponse({ description: '종목을 찾을 수 없음' })
+  @ApiForbiddenResponse({ description: '남의 개인 종목은 사용할 수 없음' })
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['startFile', 'endFile', 'exerciseType'],
+      required: ['startFile', 'endFile', 'exerciseId'],
       properties: {
         startFile: {
           type: 'string',
@@ -65,7 +73,10 @@ export class RecordsController {
           format: 'binary',
           description: '운동 종료 사진',
         },
-        exerciseType: { type: 'string', description: '운동 종류' },
+        exerciseId: {
+          type: 'string',
+          description: '종목 ID (기본 종목 또는 내 종목, GET /exercises 참고)',
+        },
         durationSec: {
           type: 'number',
           minimum: 0,
@@ -88,6 +99,7 @@ export class RecordsController {
   // 내 월별 기록 조회 (캘린더용)
   @Get('me')
   @ApiOperation({ summary: '내 월별 운동 기록 조회' })
+  @ApiOkResponse({ type: RecordResponseDto, isArray: true })
   @ApiQuery({ name: 'year', type: Number, example: 2026 })
   @ApiQuery({ name: 'month', type: Number, example: 8 })
   findMyRecordsByMonth(
@@ -101,6 +113,7 @@ export class RecordsController {
   // 기록 상세 조회 (본인 기록만)
   @Get(':id')
   @ApiOperation({ summary: '운동 기록 상세 조회' })
+  @ApiOkResponse({ type: RecordResponseDto })
   findOne(
     @CurrentUser() user: { id: string; email: string },
     @Param('id') id: string,
