@@ -14,6 +14,7 @@ import { ReactionsModule } from './modules/reactions/reactions.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { CalendarModule } from './modules/calendar/calendar.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
     NotificationsModule,
     StatsModule,
     CategoriesModule,
+    CalendarModule,
   ],
   controllers: [AppController],
   providers: [AppService],
