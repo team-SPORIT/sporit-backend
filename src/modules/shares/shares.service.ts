@@ -12,7 +12,7 @@ import { CreateShareDto } from './dto/create-share.dto';
 export class SharesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 기록을 그룹에 공유 (본인 기록 + 그룹 멤버만 가능, 중복 공유 불가)
+  // 기록을 그룹에 공유 (본인 기록 + 그룹 멤버만 가능, 중복 공유 불가, 제한 중인 그룹은 허용 종목만 가능)
   async create(userId: string, dto: CreateShareDto) {
     const recordId = BigInt(dto.recordId);
     const groupId = BigInt(dto.groupId);
@@ -32,6 +32,21 @@ export class SharesService {
     });
     if (!membership) {
       throw new ForbiddenException('그룹 멤버만 공유할 수 있습니다.');
+    }
+
+    // 그룹에 허용 종목이 설정되어 있으면(제한 있음) 기록의 종목이 허용 목록에 있어야 한다.
+    // 이미 공유된 기록은 허용 목록이 바뀌어도 그대로 유지되므로 새 공유에만 적용한다
+    const allowedExercises = await this.prisma.group_exercises.findMany({
+      where: { group_id: groupId },
+      select: { exercise_id: true },
+    });
+    if (
+      allowedExercises.length > 0 &&
+      !allowedExercises.some(
+        ({ exercise_id }) => exercise_id === record.exercise_id,
+      )
+    ) {
+      throw new ForbiddenException('이 그룹에서 허용되지 않은 종목입니다.');
     }
 
     const existingShare = await this.prisma.record_shares.findUnique({
