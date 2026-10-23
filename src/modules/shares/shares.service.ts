@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateShareDto } from './dto/create-share.dto';
 
@@ -40,8 +41,18 @@ export class SharesService {
       throw new ConflictException('이미 이 그룹에 공유한 기록입니다.');
     }
 
-    return this.prisma.record_shares.create({
-      data: { record_id: recordId, group_id: groupId },
+    // 공유 생성과 그룹의 마지막 공유 시각(last_shared_at) 갱신을 한 트랜잭션으로 처리
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const share = await tx.record_shares.create({
+        data: { record_id: recordId, group_id: groupId },
+      });
+
+      await tx.groups.update({
+        where: { id: groupId },
+        data: { last_shared_at: share.shared_at },
+      });
+
+      return share;
     });
   }
 
@@ -58,6 +69,19 @@ export class SharesService {
       throw new ForbiddenException('본인이 공유한 기록만 취소할 수 있습니다.');
     }
 
-    await this.prisma.record_shares.delete({ where: { id: shareId } });
+    // 공유 삭제 후 그룹의 last_shared_at을 남은 공유 중 가장 최근 시각으로 다시 계산 (없으면 null)
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.record_shares.delete({ where: { id: shareId } });
+
+      const latest = await tx.record_shares.aggregate({
+        where: { group_id: share.group_id },
+        _max: { shared_at: true },
+      });
+
+      await tx.groups.update({
+        where: { id: share.group_id },
+        data: { last_shared_at: latest._max.shared_at },
+      });
+    });
   }
 }
