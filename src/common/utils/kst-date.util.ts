@@ -45,3 +45,19 @@ export function kstDateToUtcRange(kstDate: Date): { start: Date; end: Date } {
   const start = new Date(kstDate.getTime() - KST_OFFSET_MS);
   return { start, end: new Date(start.getTime() + DAY_MS) };
 }
+
+// getKstToday() 형태의 날짜에서 days일 후 날짜
+export function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * DAY_MS);
+}
+
+// getKstToday() 형태의 날짜가 속한 주의 월요일 (주는 월요일 시작~일요일 끝)
+export function getKstWeekStart(date: Date): Date {
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7; // 월=0 ... 일=6
+  return subtractDays(date, daysSinceMonday);
+}
+
+// getKstToday() 형태의 날짜를 "YYYY-MM-DD" 문자열로 변환 (parseKstDate의 역변환)
+export function formatKstDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
