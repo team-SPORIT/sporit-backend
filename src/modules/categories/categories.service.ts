@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
+import { getColorHex } from '../../common/constants/palette.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MAX_CATEGORIES_PER_USER } from './categories.constants';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -170,12 +171,13 @@ export class CategoriesService {
     throw error;
   }
 
-  // 응답 형태: { id, name, color, exerciseNames }
+  // 응답 형태: { id, name, color, colorHex, exerciseNames }
   private toResponse(category: CategoryWithMap) {
     return {
       id: category.id,
       name: category.name,
       color: category.color,
+      colorHex: getColorHex(category.color),
       exerciseNames: category.exercise_category_map.map(
         (mapping) => mapping.exercise_name,
       ),

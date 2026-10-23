@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { getColorHex } from '../../common/constants/palette.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   formatKstDate,
@@ -79,6 +80,7 @@ export class CalendarService {
           categoryId: null,
           categoryName: null,
           color: null,
+          colorHex: null,
         });
       }
       days.set(date, day);
@@ -94,7 +96,7 @@ export class CalendarService {
   }
 
   // 등장한 종목 이름들의 카테고리를 exercise_category_map(+exercise_categories)에서 한 번에 조회해 붙인다.
-  // 매핑이 없는 종목(미분류)은 categoryId/categoryName/color가 null로 남는다. color는 DB의 팔레트 키 그대로
+  // 매핑이 없는 종목(미분류)은 categoryId/categoryName/color/colorHex가 null로 남는다. color는 DB의 팔레트 키 그대로
   private async attachCategories(userId: string, days: CalendarDayDto[]) {
     const names = [
       ...new Set(
@@ -126,6 +128,7 @@ export class CalendarService {
         exercise.categoryId = category.id;
         exercise.categoryName = category.name;
         exercise.color = category.color;
+        exercise.colorHex = getColorHex(category.color);
       }
     }
   }

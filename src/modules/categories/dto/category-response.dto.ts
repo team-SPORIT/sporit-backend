@@ -17,6 +17,15 @@ export class CategoryResponseDto {
   color: string;
 
   @ApiProperty({
+    description:
+      '색상 hex 값 (color 키에 대응). 이전 팔레트의 키가 남아 있으면 null',
+    type: String,
+    nullable: true,
+    example: '#0079FF',
+  })
+  colorHex: string | null;
+
+  @ApiProperty({
     description: '이 카테고리에 매핑된 종목 이름 목록 (이름순)',
     type: String,
     isArray: true,
@@ -26,12 +35,22 @@ export class CategoryResponseDto {
 }
 
 // 색상 팔레트 응답
+export class PaletteColorDto {
+  @ApiProperty({
+    description: '팔레트 키 (color 값으로 사용)',
+    example: 'blue',
+  })
+  key: string;
+
+  @ApiProperty({ description: '색상 hex 값', example: '#0079FF' })
+  hex: string;
+}
+
 export class CategoryColorsResponseDto {
   @ApiProperty({
-    description: '사용할 수 있는 색상 팔레트 키 목록',
-    type: String,
+    description: '사용할 수 있는 색상 팔레트 (12색)',
+    type: PaletteColorDto,
     isArray: true,
-    example: PALETTE_KEYS,
   })
-  colors: string[];
+  colors: PaletteColorDto[];
 }

@@ -30,6 +30,14 @@ export class CalendarExerciseDto {
     example: 'blue',
   })
   color: string | null;
+
+  @ApiProperty({
+    description: '카테고리 색상 hex 값 (color 키에 대응, 미분류면 null)',
+    type: String,
+    nullable: true,
+    example: '#0079FF',
+  })
+  colorHex: string | null;
 }
 
 // 기록이 있는 하루

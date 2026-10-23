@@ -27,7 +27,7 @@ import {
 } from '@nestjs/swagger';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { PALETTE_KEYS } from '../../common/constants/palette.constants';
+import { PALETTE } from '../../common/constants/palette.constants';
 import { MAX_CATEGORIES_PER_USER } from './categories.constants';
 import { CategoriesService } from './categories.service';
 import {
@@ -55,7 +55,7 @@ export class CategoriesController {
   })
   @ApiOkResponse({ type: CategoryColorsResponseDto })
   getColors() {
-    return { colors: [...PALETTE_KEYS] };
+    return { colors: PALETTE.map(({ key, hex }) => ({ key, hex })) };
   }
 
   // 내 카테고리 목록 (생성순, 종목 이름 포함)
