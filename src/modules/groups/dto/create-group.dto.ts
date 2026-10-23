@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -8,6 +9,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { PALETTE_KEYS } from '../../../common/constants/palette.constants';
 
 // 그룹 생성용 DTO
 export class CreateGroupDto {
@@ -27,4 +29,14 @@ export class CreateGroupDto {
   @Min(2)
   @Max(50)
   maxMembers?: number;
+
+  @ApiPropertyOptional({
+    description:
+      '그룹 색상 팔레트 키 (GET /categories/colors 참고). 생략하면 팔레트에서 무작위로 배정된다',
+    enum: PALETTE_KEYS,
+    example: 'blue',
+  })
+  @IsOptional()
+  @IsIn(PALETTE_KEYS)
+  color?: string;
 }

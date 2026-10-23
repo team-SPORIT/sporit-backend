@@ -7,6 +7,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
+import {
+  getColorHex,
+  randomPaletteKey,
+} from '../../common/constants/palette.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   getKstToday,
@@ -42,6 +46,7 @@ export class GroupsService {
       const group = await tx.groups.create({
         data: {
           name: dto.name,
+          color: dto.color ?? randomPaletteKey(), // 색을 보내지 않으면 팔레트에서 무작위 배정
           invite_code: inviteCode,
           max_members: dto.maxMembers ?? DEFAULT_MAX_MEMBERS,
           owner_id: userId,
@@ -52,8 +57,14 @@ export class GroupsService {
         data: { group_id: group.id, user_id: userId },
       });
 
-      return group;
+      return this.withColorHex(group);
     });
+  }
+
+  // 그룹 응답에 color(팔레트 key)에 대응하는 colorHex를 덧붙인다 (그룹 응답은 DB 컬럼 키 그대로 snake_case이고,
+  // 추가 필드인 memberCount처럼 colorHex는 camelCase로 둔다)
+  private withColorHex<T extends { color: string }>(group: T) {
+    return { ...group, colorHex: getColorHex(group.color) };
   }
 
   // 초대 코드로 그룹 참여
@@ -83,7 +94,7 @@ export class GroupsService {
       data: { group_id: group.id, user_id: userId },
     });
 
-    return group;
+    return this.withColorHex(group);
   }
 
   // 내가 속한 그룹 목록 (MY_GROUPS_ORDER_BY 정렬)
@@ -100,7 +111,10 @@ export class GroupsService {
     });
     return memberships.map(({ groups }) => {
       const { _count, ...group } = groups;
-      return { ...group, memberCount: _count.group_members };
+      return {
+        ...this.withColorHex(group),
+        memberCount: _count.group_members,
+      };
     });
   }
 
@@ -114,6 +128,7 @@ export class GroupsService {
           select: {
             id: true,
             name: true,
+            color: true,
             group_exercises: {
               include: {
                 exercises: { select: { id: true, name: true } },
@@ -129,6 +144,8 @@ export class GroupsService {
     return memberships.map(({ groups }) => ({
       groupId: groups.id,
       groupName: groups.name,
+      color: groups.color,
+      colorHex: getColorHex(groups.color),
       exercises: groups.group_exercises.map(({ exercises }) => exercises),
     }));
   }
@@ -142,7 +159,7 @@ export class GroupsService {
       throw new ForbiddenException('그룹 멤버만 조회할 수 있습니다.');
     }
 
-    return this.prisma.groups.findUnique({
+    const group = await this.prisma.groups.findUnique({
       where: { id: groupId },
       include: {
         group_members: {
@@ -152,6 +169,7 @@ export class GroupsService {
         },
       },
     });
+    return group && this.withColorHex(group);
   }
 
   // 그룹 허용 종목 조회 (멤버만 가능). allow_all_exercises가 true면 제한 없음
