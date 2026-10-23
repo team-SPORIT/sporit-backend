@@ -155,6 +155,16 @@ export class GroupsService {
       orderBy: { shared_at: 'asc' },
     });
 
+    // 내가 좋아요한 공유 ID를 한 번에 조회 (공유별 쿼리 방지)
+    const myReactions = await this.prisma.record_reactions.findMany({
+      where: {
+        user_id: userId,
+        share_id: { in: shares.map((share) => share.id) },
+      },
+      select: { share_id: true },
+    });
+    const likedShareIds = new Set(myReactions.map((r) => r.share_id));
+
     return {
       locked: false,
       records: shares.map((share) => ({
@@ -172,10 +182,47 @@ export class GroupsService {
           nickname: share.records.profiles.nickname,
           profileImage: share.records.profiles.profile_image,
         },
-        reactionCount: share._count.record_reactions,
+        likeCount: share._count.record_reactions,
         commentCount: share._count.record_comments,
+        likedByMe: likedShareIds.has(share.id),
       })),
     };
+  }
+
+  // 공유(share)에 좋아요/댓글을 달 수 있는지 검증: 공유가 없으면 404, 그룹 멤버가 아니면 403,
+  // 오늘(KST) 내가 이 그룹에 공유하지 않았다면(피드 잠금 상태) 403
+  async assertShareInteractable(userId: string, shareId: bigint) {
+    const share = await this.prisma.record_shares.findUnique({
+      where: { id: shareId },
+      select: { id: true, group_id: true },
+    });
+    if (!share) {
+      throw new NotFoundException('공유를 찾을 수 없습니다.');
+    }
+
+    const membership = await this.prisma.group_members.findUnique({
+      where: {
+        group_id_user_id: { group_id: share.group_id, user_id: userId },
+      },
+    });
+    if (!membership) {
+      throw new ForbiddenException('그룹 멤버만 이용할 수 있습니다.');
+    }
+
+    const { start, end } = kstDateToUtcRange(getKstToday());
+    const isUnlocked = await this.isUnlockedFor(
+      userId,
+      share.group_id,
+      start,
+      end,
+    );
+    if (!isUnlocked) {
+      throw new ForbiddenException(
+        '오늘 이 그룹에 기록을 공유해야 이용할 수 있습니다.',
+      );
+    }
+
+    return share;
   }
 
   // 내가 해당 그룹에 [start, end) 시간 범위로 공유한 기록이 있는지 (잠금 판단용)

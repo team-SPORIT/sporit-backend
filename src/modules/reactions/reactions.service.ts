@@ -1,26 +1,31 @@
 import { Injectable } from '@nestjs/common';
-import { CreateReactionDto } from './dto/create-reaction.dto';
-import { UpdateReactionDto } from './dto/update-reaction.dto';
+import { PrismaService } from '../../prisma/prisma.service';
+import { GroupsService } from '../groups/groups.service';
 
 @Injectable()
 export class ReactionsService {
-  create(createReactionDto: CreateReactionDto) {
-    return 'This action adds a new reaction';
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly groupsService: GroupsService,
+  ) {}
+
+  // 좋아요: 이미 눌렀어도 에러 없이 성공 (upsert)
+  async like(userId: string, shareId: bigint) {
+    await this.groupsService.assertShareInteractable(userId, shareId);
+
+    await this.prisma.record_reactions.upsert({
+      where: { share_id_user_id: { share_id: shareId, user_id: userId } },
+      create: { share_id: shareId, user_id: userId },
+      update: {},
+    });
   }
 
-  findAll() {
-    return `This action returns all reactions`;
-  }
+  // 좋아요 취소: 누르지 않았어도 에러 없이 성공 (deleteMany)
+  async unlike(userId: string, shareId: bigint) {
+    await this.groupsService.assertShareInteractable(userId, shareId);
 
-  findOne(id: number) {
-    return `This action returns a #${id} reaction`;
-  }
-
-  update(id: number, updateReactionDto: UpdateReactionDto) {
-    return `This action updates a #${id} reaction`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} reaction`;
+    await this.prisma.record_reactions.deleteMany({
+      where: { share_id: shareId, user_id: userId },
+    });
   }
 }
