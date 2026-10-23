@@ -27,9 +27,10 @@ export class CalendarService {
     userId: string,
     monthStr?: string,
   ): Promise<CalendarResponseDto> {
-    const parsed = monthStr
-      ? parseKstMonth(monthStr)
-      : parseKstMonth(formatKstMonth(getKstToday()));
+    const parsed =
+      monthStr !== undefined
+        ? parseKstMonth(monthStr)
+        : parseKstMonth(formatKstMonth(getKstToday()));
     if (!parsed) {
       throw new BadRequestException(
         'month는 YYYY-MM 형식(월 01~12)이어야 합니다.',
