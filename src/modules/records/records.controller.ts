@@ -7,16 +7,15 @@ import {
   HttpStatus,
   NotFoundException,
   Param,
-  ParseFilePipeBuilder,
   ParseIntPipe,
   Post,
   Query,
-  UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
   ValidationPipe,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -28,7 +27,10 @@ import {
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateRecordDto } from './dto/create-record.dto';
-import { RECORD_IMAGE_MAX_SIZE_BYTES } from './records.constants';
+import {
+  type RecordImageFiles,
+  RecordImagesPipe,
+} from './pipes/record-images.pipe';
 import { RecordsService } from './records.service';
 
 @ApiTags('records')
@@ -38,9 +40,14 @@ import { RecordsService } from './records.service';
 export class RecordsController {
   constructor(private readonly recordsService: RecordsService) {}
 
-  // 운동 기록 작성 (이미지 필수, multipart/form-data)
+  // 운동 기록 작성 (시작/종료 이미지 필수, multipart/form-data)
   @Post()
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'startFile', maxCount: 1 },
+      { name: 'endFile', maxCount: 1 },
+    ]),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: '운동 기록 작성' })
   @ApiBody({
@@ -59,18 +66,9 @@ export class RecordsController {
     @CurrentUser() user: { id: string; email: string },
     @Body(new ValidationPipe({ transform: true, whitelist: true }))
     createRecordDto: CreateRecordDto,
-    @UploadedFile(
-      new ParseFilePipeBuilder()
-        .addFileTypeValidator({
-          fileType: /^(image\/jpeg|image\/png|image\/webp)$/,
-          fallbackToMimetype: true,
-        })
-        .addMaxSizeValidator({ maxSize: RECORD_IMAGE_MAX_SIZE_BYTES })
-        .build({ errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY }),
-    )
-    file: Express.Multer.File,
+    @UploadedFiles(RecordImagesPipe) files: RecordImageFiles,
   ) {
-    return this.recordsService.create(user.id, createRecordDto, file);
+    return this.recordsService.create(user.id, createRecordDto, files);
   }
 
   // 내 월별 기록 조회 (캘린더용)

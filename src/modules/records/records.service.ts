@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   Injectable,
   InternalServerErrorException,
@@ -12,6 +13,7 @@ import {
   subtractDays,
 } from '../../common/utils/kst-date.util';
 import { CreateRecordDto } from './dto/create-record.dto';
+import type { RecordImageFiles } from './pipes/record-images.pipe';
 import { MIME_TO_EXT, RECORD_IMAGES_BUCKET } from './records.constants';
 
 @Injectable()
@@ -22,15 +24,34 @@ export class RecordsService {
   ) {}
 
   // 운동 기록 작성
-  // 이미지는 트랜잭션 밖(외부 스토리지)에서 먼저 업로드하고, 기록 생성 + 스트릭 갱신 + 종목 통계 upsert는 하나의 트랜잭션으로 묶는다
-  async create(
-    userId: string,
-    dto: CreateRecordDto,
-    file: Express.Multer.File,
-  ) {
-    const photoUrl = await this.uploadRecordImage(userId, file);
+  // 이미지 2장(시작/종료)은 트랜잭션 밖(외부 스토리지)에서 먼저 업로드하고, 기록 생성 + 스트릭 갱신 + 종목 통계 upsert는 하나의 트랜잭션으로 묶는다
+  // DB 저장이 실패하면 이미 올라간 이미지 2장을 지워 고아 파일을 남기지 않는다
+  async create(userId: string, dto: CreateRecordDto, files: RecordImageFiles) {
+    const { startPath, endPath, startImageUrl, endImageUrl } =
+      await this.uploadRecordImages(userId, files);
     const recordDate = getKstToday();
 
+    try {
+      return await this.createRecordInTransaction(
+        userId,
+        dto,
+        recordDate,
+        startImageUrl,
+        endImageUrl,
+      );
+    } catch (error) {
+      await this.removeFromStorage([startPath, endPath]);
+      throw error;
+    }
+  }
+
+  private createRecordInTransaction(
+    userId: string,
+    dto: CreateRecordDto,
+    recordDate: Date,
+    startImageUrl: string,
+    endImageUrl: string,
+  ) {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const record = await tx.records.create({
         data: {
@@ -38,8 +59,8 @@ export class RecordsService {
           exercise_type: dto.exerciseType,
           duration_min: dto.durationMin,
           comment: dto.comment,
-          start_image_url: photoUrl,
-          end_image_url: photoUrl, // 임시: 2장 업로드 지원 전까지 동일 URL 사용
+          start_image_url: startImageUrl,
+          end_image_url: endImageUrl,
           record_date: recordDate,
         },
       });
@@ -90,27 +111,59 @@ export class RecordsService {
     await this.deleteRecordImage(record.start_image_url);
   }
 
-  // 기록 이미지를 record-images 버킷에 업로드하고 public URL 반환
-  private async uploadRecordImage(
-    userId: string,
-    file: Express.Multer.File,
-  ): Promise<string> {
+  // 시작/종료 이미지를 record-images 버킷에 업로드하고 경로와 public URL 반환
+  // 하나라도 실패하면 이미 올라간 파일을 지우고 에러를 던진다
+  private async uploadRecordImages(userId: string, files: RecordImageFiles) {
     const storage = this.supabase
       .getClient()
       .storage.from(RECORD_IMAGES_BUCKET);
-    const ext = MIME_TO_EXT[file.mimetype];
-    const path = `${userId}/record_${Date.now()}.${ext}`;
+    const id = randomUUID();
+    const startPath = `records/${userId}/${id}-start.${MIME_TO_EXT[files.startFile.mimetype]}`;
+    const endPath = `records/${userId}/${id}-end.${MIME_TO_EXT[files.endFile.mimetype]}`;
 
-    const { error } = await storage.upload(path, file.buffer, {
-      contentType: file.mimetype,
-    });
+    const uploads = [
+      { path: startPath, file: files.startFile },
+      { path: endPath, file: files.endFile },
+    ];
+    const results = await Promise.all(
+      uploads.map(async ({ path, file }) => {
+        try {
+          const { error } = await storage.upload(path, file.buffer, {
+            contentType: file.mimetype,
+          });
+          return !error;
+        } catch {
+          return false;
+        }
+      }),
+    );
 
-    if (error) {
+    if (results.includes(false)) {
+      await this.removeFromStorage(
+        uploads.filter((_, i) => results[i]).map(({ path }) => path),
+      );
       throw new InternalServerErrorException('이미지 업로드에 실패했습니다.');
     }
 
-    const { data } = storage.getPublicUrl(path);
-    return data.publicUrl;
+    return {
+      startPath,
+      endPath,
+      startImageUrl: storage.getPublicUrl(startPath).data.publicUrl,
+      endImageUrl: storage.getPublicUrl(endPath).data.publicUrl,
+    };
+  }
+
+  // Storage 파일 삭제 (실패해도 무시: 호출부의 본래 에러/성공 흐름을 유지)
+  private async removeFromStorage(paths: string[]) {
+    if (paths.length === 0) return;
+    try {
+      await this.supabase
+        .getClient()
+        .storage.from(RECORD_IMAGES_BUCKET)
+        .remove(paths);
+    } catch {
+      // 삭제 실패는 무시
+    }
   }
 
   // photo_url에서 버킷 내부 경로를 추출해 Storage에서 삭제 (실패해도 기록 삭제 자체는 성공 처리)
