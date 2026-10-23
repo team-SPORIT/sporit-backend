@@ -57,7 +57,7 @@ export class RecordsController {
   @ApiOperation({ summary: '운동 기록 작성' })
   @ApiCreatedResponse({ type: RecordResponseDto })
   @ApiNotFoundResponse({ description: '종목을 찾을 수 없음' })
-  @ApiForbiddenResponse({ description: '남의 개인 종목은 사용할 수 없음' })
+  @ApiForbiddenResponse({ description: '사용할 수 없는 종목' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -75,7 +75,8 @@ export class RecordsController {
         },
         exerciseId: {
           type: 'string',
-          description: '종목 ID (기본 종목 또는 내 종목, GET /exercises 참고)',
+          description:
+            '종목 ID (내 개인 종목 또는 내가 속한 그룹의 허용 종목, GET /exercises/selectable 참고)',
         },
         durationSec: {
           type: 'number',

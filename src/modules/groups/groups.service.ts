@@ -16,11 +16,19 @@ import {
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
+import { GroupExercisesResponseDto } from './dto/group-exercises-response.dto';
+import { SetGroupExercisesDto } from './dto/set-group-exercises.dto';
 
 const INVITE_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const INVITE_CODE_LENGTH = 8;
 const MAX_INVITE_CODE_ATTEMPTS = 5;
 const DEFAULT_MAX_MEMBERS = 10;
+
+// 내 그룹 목록 정렬: 최근 공유순(last_shared_at 내림차순, 공유가 없으면 맨 뒤), 같으면 참여 순
+const MY_GROUPS_ORDER_BY: Prisma.group_membersOrderByWithRelationInput[] = [
+  { groups: { last_shared_at: { sort: 'desc', nulls: 'last' } } },
+  { joined_at: 'asc' },
+];
 
 @Injectable()
 export class GroupsService {
@@ -78,24 +86,51 @@ export class GroupsService {
     return group;
   }
 
-  // 내가 속한 그룹 목록: 최근 공유순(last_shared_at 내림차순, 공유가 없으면 맨 뒤), 같으면 참여 순
-  async findMyGroups(userId: string) {
+  // 내가 속한 그룹 목록 (MY_GROUPS_ORDER_BY 정렬)
+  // groupsWhere로 그룹 조건을 더 좁힐 수 있다 (예: 특정 종목을 허용하는 그룹만)
+  async findMyGroups(userId: string, groupsWhere?: Prisma.groupsWhereInput) {
     const memberships = await this.prisma.group_members.findMany({
-      where: { user_id: userId },
+      where: { user_id: userId, groups: groupsWhere },
       include: {
         groups: {
           include: { _count: { select: { group_members: true } } },
         },
       },
-      orderBy: [
-        { groups: { last_shared_at: { sort: 'desc', nulls: 'last' } } },
-        { joined_at: 'asc' },
-      ],
+      orderBy: MY_GROUPS_ORDER_BY,
     });
     return memberships.map(({ groups }) => {
       const { _count, ...group } = groups;
       return { ...group, memberCount: _count.group_members };
     });
+  }
+
+  // 내가 속한 그룹 중 허용 종목이 제한된(allow_all_exercises=false) 그룹과 그 허용 종목 (내 그룹 목록과 같은 정렬)
+  // 그룹 목록, 허용 종목을 한 번의 쿼리로 가져온다 (N+1 방지)
+  async findMyRestrictedGroupsWithExercises(userId: string) {
+    const memberships = await this.prisma.group_members.findMany({
+      where: { user_id: userId, groups: { allow_all_exercises: false } },
+      include: {
+        groups: {
+          select: {
+            id: true,
+            name: true,
+            group_exercises: {
+              include: {
+                exercises: { select: { id: true, name: true } },
+              },
+              orderBy: { exercise_id: 'asc' },
+            },
+          },
+        },
+      },
+      orderBy: MY_GROUPS_ORDER_BY,
+    });
+
+    return memberships.map(({ groups }) => ({
+      groupId: groups.id,
+      groupName: groups.name,
+      exercises: groups.group_exercises.map(({ exercises }) => exercises),
+    }));
   }
 
   // 그룹 상세 (멤버만 조회 가능)
@@ -117,6 +152,126 @@ export class GroupsService {
         },
       },
     });
+  }
+
+  // 그룹 허용 종목 조회 (멤버만 가능). allow_all_exercises가 true면 제한 없음
+  async getExercises(
+    userId: string,
+    groupId: bigint,
+  ): Promise<GroupExercisesResponseDto> {
+    const membership = await this.prisma.group_members.findUnique({
+      where: { group_id_user_id: { group_id: groupId, user_id: userId } },
+    });
+    if (!membership) {
+      throw new ForbiddenException('그룹 멤버만 조회할 수 있습니다.');
+    }
+
+    return this.findGroupExercises(this.prisma, groupId);
+  }
+
+  // 그룹 허용 종목 설정 (그룹장만)
+  // - allowAll=true: allow_all_exercises만 켠다 (group_exercises는 그대로 둠)
+  // - allowAll=false: names(1개 이상 필수, 정리 후 중복 제거)로 이 그룹의 그룹 전용 종목을 find-or-create 하고,
+  //   allow_all_exercises를 끈 뒤 group_exercises를 전체 교체한다.
+  //   허용 목록에서 빠진 그룹 전용 종목은 삭제하지 않는다 (기록이 참조 중일 수 있음)
+  async setExercises(
+    userId: string,
+    groupId: bigint,
+    dto: SetGroupExercisesDto,
+  ): Promise<GroupExercisesResponseDto> {
+    const group = await this.prisma.groups.findUnique({
+      where: { id: groupId },
+      select: { owner_id: true },
+    });
+    if (!group) {
+      throw new NotFoundException('그룹을 찾을 수 없습니다.');
+    }
+    if (group.owner_id !== userId) {
+      throw new ForbiddenException('그룹장만 허용 종목을 설정할 수 있습니다.');
+    }
+
+    if (dto.allowAll) {
+      await this.prisma.groups.update({
+        where: { id: groupId },
+        data: { allow_all_exercises: true },
+      });
+      return this.findGroupExercises(this.prisma, groupId);
+    }
+
+    const names = [...new Set(dto.names ?? [])];
+    if (names.length === 0) {
+      throw new BadRequestException(
+        '허용할 종목 이름(names)을 1개 이상 지정해야 합니다.',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const exerciseIds: bigint[] = [];
+      for (const name of names) {
+        exerciseIds.push(
+          await this.findOrCreateGroupExercise(tx, groupId, name),
+        );
+      }
+
+      await tx.groups.update({
+        where: { id: groupId },
+        data: { allow_all_exercises: false },
+      });
+      await tx.group_exercises.deleteMany({ where: { group_id: groupId } });
+      await tx.group_exercises.createMany({
+        data: exerciseIds.map((exerciseId) => ({
+          group_id: groupId,
+          exercise_id: exerciseId,
+        })),
+      });
+
+      return this.findGroupExercises(tx, groupId);
+    });
+  }
+
+  // 이 그룹의 그룹 전용 종목을 이름으로 찾고, 없으면 새로 만든다
+  private async findOrCreateGroupExercise(
+    tx: Prisma.TransactionClient,
+    groupId: bigint,
+    name: string,
+  ): Promise<bigint> {
+    const existing = await tx.exercises.findFirst({
+      where: { group_id: groupId, name },
+      select: { id: true },
+    });
+    if (existing) {
+      return existing.id;
+    }
+
+    const created = await tx.exercises.create({
+      data: { group_id: groupId, name },
+      select: { id: true },
+    });
+    return created.id;
+  }
+
+  // 그룹 허용 종목 조회 (id순). allowAll과 관계없이 저장된 허용 목록을 내려준다
+  private async findGroupExercises(
+    client: Prisma.TransactionClient | PrismaService,
+    groupId: bigint,
+  ): Promise<GroupExercisesResponseDto> {
+    const group = await client.groups.findUniqueOrThrow({
+      where: { id: groupId },
+      select: {
+        allow_all_exercises: true,
+        group_exercises: {
+          include: {
+            exercises: { select: { id: true, name: true } },
+          },
+          orderBy: { exercise_id: 'asc' },
+        },
+      },
+    });
+
+    return {
+      allowAll: group.allow_all_exercises,
+      exercises: group.group_exercises.map(({ exercises }) => exercises),
+    };
   }
 
   // 그룹 피드 조회 (멤버만 가능): 내가 해당 날짜에 이 그룹에 공유하지 않았으면 잠금 처리

@@ -27,7 +27,6 @@ interface WeeklyStats {
   totalCount: number;
   days: { date: string; totalSeconds: number; count: number }[];
   byExercise: {
-    exerciseId: string;
     exerciseType: string;
     totalSeconds: number;
     count: number;
@@ -100,16 +99,6 @@ describe('주간 운동 통계 (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    // 기본 종목(owner_id null)의 id 조회
-    const [running, yoga, swimming] = await Promise.all(
-      ['러닝', '요가', '수영'].map((name) =>
-        prisma.exercises.findFirstOrThrow({ where: { owner_id: null, name } }),
-      ),
-    );
-    runningId = running.id;
-    yogaId = yoga.id;
-    swimmingId = swimming.id;
-
     userAId = (await createTestUser(userA.email, userA.password)).id;
     userBId = (await createTestUser(userB.email, userB.password)).id;
     tokenA = await getAccessToken(userA.email, userA.password);
@@ -120,6 +109,17 @@ describe('주간 운동 통계 (e2e)', () => {
         .post('/auth/sync')
         .set('Authorization', `Bearer ${token}`);
     }
+
+    // 기본 종목이 없으므로 A의 개인 종목(러닝/요가/수영)과 B의 개인 종목(러닝)을 만든다
+    const [running, yoga, swimming, runningOfB] = await Promise.all([
+      prisma.exercises.create({ data: { owner_id: userAId, name: '러닝' } }),
+      prisma.exercises.create({ data: { owner_id: userAId, name: '요가' } }),
+      prisma.exercises.create({ data: { owner_id: userAId, name: '수영' } }),
+      prisma.exercises.create({ data: { owner_id: userBId, name: '러닝' } }),
+    ]);
+    runningId = running.id;
+    yogaId = yoga.id;
+    swimmingId = swimming.id;
 
     const data = [
       // 이번 주: 월요일~오늘까지 매일 러닝 600초, 월요일에는 요가 50000초 + 시간 없는 수영
@@ -146,8 +146,8 @@ describe('주간 운동 통계 (e2e)', () => {
       // 2주 전: 월요일 러닝 1000초
       record(userAId, twoWeeksAgoMonday, runningId, 1000),
       // 다른 유저(B)의 기록: A의 통계에 포함되면 안 된다
-      record(userBId, thisMonday, runningId, 99999),
-      record(userBId, lastMonday, runningId, 99999),
+      record(userBId, thisMonday, runningOfB.id, 99999),
+      record(userBId, lastMonday, runningOfB.id, 99999),
     ];
     await prisma.records.createMany({ data });
   });
@@ -191,19 +191,16 @@ describe('주간 운동 통계 (e2e)', () => {
 
     expect(body.byExercise).toEqual([
       {
-        exerciseId: yogaId.toString(),
         exerciseType: '요가',
         totalSeconds: THIS_WEEK_YOGA_SECONDS,
         count: 1,
       },
       {
-        exerciseId: runningId.toString(),
         exerciseType: '러닝',
         totalSeconds: THIS_WEEK_RUNNING_PER_DAY * (todayIndex + 1),
         count: todayIndex + 1,
       },
       {
-        exerciseId: swimmingId.toString(),
         exerciseType: '수영',
         totalSeconds: 0,
         count: 1,

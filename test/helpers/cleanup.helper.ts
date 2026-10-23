@@ -40,18 +40,24 @@ export interface CleanupTarget {
 }
 
 // 테스트에서 만든 데이터 정리.
-// groups는 owner_id FK가 NoAction이라 유저 삭제 전에 먼저 지워야 하고(멤버십/공유는 Cascade로 함께 삭제됨),
-// 그 다음 auth 유저를 지우면 profiles/records/기록 통계 등은 DB의 Cascade 관계로 함께 정리된다
+// 1) records -> exercises FK가 RESTRICT라서, 그룹 전용 종목(그룹 삭제 시 cascade)이나 개인 종목을 쓰는 기록을
+//    먼저 지워야 그룹/유저 삭제가 막히지 않는다. (기록 작성자들의 기록과 Storage 사진을 가장 먼저 정리)
+// 2) groups는 owner_id FK가 NoAction이라 유저 삭제 전에 먼저 지운다 (멤버십/공유/그룹 전용 종목은 Cascade)
+// 3) 마지막에 auth 유저를 지우면 profiles/개인 종목/기록 통계 등은 DB의 Cascade 관계로 함께 정리된다
 export async function cleanupTestData({
   userIds = [],
   groupIds = [],
 }: CleanupTarget): Promise<void> {
+  for (const userId of userIds) {
+    await removeRecordImages(userId);
+    await prisma.records.deleteMany({ where: { user_id: userId } });
+  }
+
   if (groupIds.length > 0) {
     await prisma.groups.deleteMany({ where: { id: { in: groupIds } } });
   }
 
   for (const userId of userIds) {
-    await removeRecordImages(userId);
     await deleteTestUser(userId);
   }
 }

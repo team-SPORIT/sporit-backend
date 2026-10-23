@@ -12,13 +12,14 @@ import { CreateShareDto } from './dto/create-share.dto';
 export class SharesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 기록을 그룹에 공유 (본인 기록 + 그룹 멤버만 가능, 중복 공유 불가)
+  // 기록을 그룹에 공유 (본인 기록 + 그룹 멤버만 가능, 중복 공유 불가, 제한 중인 그룹은 허용 종목 이름과 같은 종목만 가능)
   async create(userId: string, dto: CreateShareDto) {
     const recordId = BigInt(dto.recordId);
     const groupId = BigInt(dto.groupId);
 
     const record = await this.prisma.records.findUnique({
       where: { id: recordId },
+      include: { exercises: { select: { name: true } } },
     });
     if (!record) {
       throw new NotFoundException('기록을 찾을 수 없습니다.');
@@ -32,6 +33,26 @@ export class SharesService {
     });
     if (!membership) {
       throw new ForbiddenException('그룹 멤버만 공유할 수 있습니다.');
+    }
+
+    // 그룹이 허용 종목을 제한 중(allow_all_exercises=false)이면, 기록 종목의 "이름"이
+    // 그 그룹 허용 종목 이름 중 하나와 정확히 같아야 한다 (개인 종목과 그룹 전용 종목은 이름으로 연결된다).
+    // 이미 공유된 기록은 허용 목록이 바뀌어도 그대로 유지되므로 새 공유에만 적용한다
+    const group = await this.prisma.groups.findUnique({
+      where: { id: groupId },
+      select: { allow_all_exercises: true },
+    });
+    if (group && !group.allow_all_exercises) {
+      const allowedByName = await this.prisma.group_exercises.findFirst({
+        where: {
+          group_id: groupId,
+          exercises: { name: record.exercises.name },
+        },
+        select: { exercise_id: true },
+      });
+      if (!allowedByName) {
+        throw new ForbiddenException('이 그룹에서 허용되지 않은 종목입니다.');
+      }
     }
 
     const existingShare = await this.prisma.record_shares.findUnique({

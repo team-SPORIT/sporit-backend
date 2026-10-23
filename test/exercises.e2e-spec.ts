@@ -13,13 +13,12 @@ import {
 
 const TEST_IMAGE_PATH = path.join(__dirname, 'fixtures', 'test-image.png');
 const runId = Date.now();
-const DUMMY_IMAGE_URL = 'https://example.com/dummy.jpg';
 
 interface ExerciseResponse {
   id: string;
   name: string;
-  owner_id: string | null;
-  isDefault: boolean;
+  owner_id: string;
+  created_at: string;
 }
 
 interface RecordResponse {
@@ -28,16 +27,12 @@ interface RecordResponse {
   exercise_type: string;
 }
 
-interface WeeklyStats {
-  byExercise: {
-    exerciseId: string;
-    exerciseType: string;
-    totalSeconds: number;
-    count: number;
-  }[];
+interface SelectableResponse {
+  mine: { id: string; name: string }[];
+  groups: unknown[];
 }
 
-// 종목: 기본 종목 + 개인 종목 조회/추가/삭제, 기록 생성 시 종목 권한 검증, 주간 통계의 exercise_id 기준 집계
+// 종목: 기본 종목 없이 개인 종목만 조회/추가/삭제, 기록 생성 시 종목 권한 검증
 describe('종목 (e2e)', () => {
   let app: INestApplication<App>;
 
@@ -47,10 +42,11 @@ describe('종목 (e2e)', () => {
   };
   const password = 'Test1234!';
 
-  let runningId: string;
-  let customNameA: string;
-  let customIdA: string;
-  let customIdB: string;
+  const nameA = `E2E 내 종목 ${runId}`;
+  const nameA2 = `E2E 내 종목2 ${runId}`;
+  let idA: string;
+  let idA2: string;
+  let idB: string;
 
   const server = () => app.getHttpServer();
   const authOf = (user: { token: string }) => ({
@@ -75,18 +71,11 @@ describe('종목 (e2e)', () => {
       user.token = await getAccessToken(user.email, password);
       await request(server()).post('/auth/sync').set(authOf(user));
     }
-
-    const running = await prisma.exercises.findFirstOrThrow({
-      where: { owner_id: null, name: '러닝' },
-    });
-    runningId = running.id.toString();
-    customNameA = `E2E 내 종목 ${runId}`;
   });
 
   afterAll(async () => {
     await app.close();
-    // 개인 종목은 owner(유저) 삭제 시 cascade로 함께 지워진다. 기록이 종목을 참조 중(RESTRICT)이므로
-    // 기록은 유저 삭제 cascade에서 같이 정리되는지 afterAll에서 확인한다
+    // 기록이 종목을 참조 중(RESTRICT)이므로 cleanup이 기록을 먼저 지운 뒤 유저(개인 종목 cascade)를 지운다
     await cleanupTestData({ userIds: Object.values(users).map((u) => u.id) });
     const leftover = await prisma.exercises.count({
       where: { owner_id: { in: Object.values(users).map((u) => u.id) } },
@@ -95,78 +84,80 @@ describe('종목 (e2e)', () => {
     await disconnectPrisma();
   });
 
-  it('1. 개인 종목을 추가하면 201이고 isDefault=false, owner_id가 내 id이다', async () => {
+  it('1. 개인 종목을 추가하면 201이고 owner_id가 내 id이며 isDefault 필드는 없다', async () => {
     const res = await request(server())
       .post('/exercises')
       .set(authOf(users.a))
-      .send({ name: customNameA })
+      .send({ name: nameA })
       .expect(201);
     const body = res.body as ExerciseResponse;
 
-    expect(body.name).toBe(customNameA);
+    expect(body.name).toBe(nameA);
     expect(body.owner_id).toBe(users.a.id);
-    expect(body.isDefault).toBe(false);
-    customIdA = body.id;
+    expect(body).not.toHaveProperty('isDefault');
+    idA = body.id;
 
+    const res2 = await request(server())
+      .post('/exercises')
+      .set(authOf(users.a))
+      .send({ name: nameA2 })
+      .expect(201);
+    idA2 = (res2.body as ExerciseResponse).id;
+
+    // 다른 유저는 같은 이름의 종목을 따로 만들 수 있다 (개인 종목은 소유자별로 이름이 유일)
     const resB = await request(server())
       .post('/exercises')
       .set(authOf(users.b))
-      .send({ name: `E2E B 종목 ${runId}` })
+      .send({ name: nameA })
       .expect(201);
-    customIdB = (resB.body as ExerciseResponse).id;
+    idB = (resB.body as ExerciseResponse).id;
+    expect(idB).not.toBe(idA);
   });
 
-  it('2. GET /exercises는 기본 종목 먼저, 그 뒤에 내 종목을 내려주고 남의 종목은 없다', async () => {
-    const res = await request(server())
+  it('2. GET /exercises는 내 개인 종목만 id순으로 내려준다', async () => {
+    const resA = await request(server())
       .get('/exercises')
       .set(authOf(users.a))
       .expect(200);
-    const list = res.body as ExerciseResponse[];
+    const listA = resA.body as ExerciseResponse[];
+    expect(listA.map((exercise) => exercise.id)).toEqual([idA, idA2]);
+    expect(listA.every((exercise) => exercise.owner_id === users.a.id)).toBe(
+      true,
+    );
 
-    const defaults = list.filter((exercise) => exercise.isDefault);
-    const mine = list.filter((exercise) => !exercise.isDefault);
-
-    expect(defaults.length).toBeGreaterThan(0);
-    expect(defaults.every((exercise) => exercise.owner_id === null)).toBe(true);
-    expect(defaults.map((exercise) => exercise.name)).toContain('러닝');
-    expect(mine.map((exercise) => exercise.id)).toEqual([customIdA]);
-    expect(list.map((exercise) => exercise.id)).not.toContain(customIdB);
-
-    // 기본 종목이 모두 내 종목보다 앞에 오고, 각각 id 오름차순이다
-    expect(list.slice(0, defaults.length)).toEqual(defaults);
-    const defaultIds = defaults.map((exercise) => BigInt(exercise.id));
-    expect(defaultIds).toEqual([...defaultIds].sort((a, b) => Number(a - b)));
+    const resB = await request(server())
+      .get('/exercises')
+      .set(authOf(users.b))
+      .expect(200);
+    expect((resB.body as ExerciseResponse[]).map((e) => e.id)).toEqual([idB]);
   });
 
-  it('3. 기존 GET /exercises/me는 더 이상 없다', async () => {
-    await request(server())
-      .get('/exercises/me')
+  it('3. GET /exercises/selectable은 mine과 groups만 내려주고 defaults는 없다', async () => {
+    const res = await request(server())
+      .get('/exercises/selectable')
       .set(authOf(users.a))
-      .expect(404);
+      .expect(200);
+    const body = res.body as SelectableResponse;
+
+    expect(body.mine).toEqual([
+      { id: idA, name: nameA },
+      { id: idA2, name: nameA2 },
+    ]);
+    expect(body.groups).toEqual([]);
+    expect(body).not.toHaveProperty('defaults');
   });
 
-  it('4. 내 종목과 같은 이름이나 기본 종목과 같은 이름으로 추가하면 409이다', async () => {
+  it('4. 내 종목에 같은 이름이 이미 있으면 409이다 (기본 종목 개념은 없다)', async () => {
     await request(server())
       .post('/exercises')
       .set(authOf(users.a))
-      .send({ name: customNameA })
-      .expect(409);
-
-    await request(server())
-      .post('/exercises')
-      .set(authOf(users.a))
-      .send({ name: '러닝' })
+      .send({ name: nameA })
       .expect(409);
   });
 
-  it('5. 기본 종목 삭제는 403, 남의 종목 삭제는 403, 없는 종목은 404이다', async () => {
+  it('5. 남의 종목 삭제는 403, 없는 종목은 404, 숫자가 아닌 id도 404이다', async () => {
     await request(server())
-      .delete(`/exercises/${runningId}`)
-      .set(authOf(users.a))
-      .expect(403);
-
-    await request(server())
-      .delete(`/exercises/${customIdB}`)
+      .delete(`/exercises/${idB}`)
       .set(authOf(users.a))
       .expect(403);
 
@@ -181,20 +172,17 @@ describe('종목 (e2e)', () => {
       .expect(404);
   });
 
-  it('6. 기본 종목과 내 개인 종목으로 기록을 만들 수 있고 응답에 exercise_id/exercise_type이 있다', async () => {
-    const res1 = await createRecord(users.a, runningId).expect(201);
-    const body1 = res1.body as RecordResponse;
-    expect(body1.exercise_id).toBe(runningId);
-    expect(body1.exercise_type).toBe('러닝');
+  it('6. 내 개인 종목으로 기록을 만들 수 있고 응답에 exercise_id/exercise_type이 있다', async () => {
+    const res = await createRecord(users.a, idA).expect(201);
+    const body = res.body as RecordResponse;
 
-    const res2 = await createRecord(users.a, customIdA).expect(201);
-    const body2 = res2.body as RecordResponse;
-    expect(body2.exercise_id).toBe(customIdA);
-    expect(body2.exercise_type).toBe(customNameA);
+    expect(body.exercise_id).toBe(idA);
+    expect(body.exercise_type).toBe(nameA);
   });
 
-  it('7. 남의 개인 종목으로 기록을 만들면 403, 없는 종목이면 404, exerciseId가 없으면 400이다', async () => {
-    await createRecord(users.a, customIdB).expect(403);
+  it('7. 남의 개인 종목은 403, 없는 종목은 404, exerciseId가 없으면 400이다', async () => {
+    await createRecord(users.a, idB).expect(403);
+    await createRecord(users.b, idA).expect(403);
     await createRecord(users.a, '999999999').expect(404);
 
     await request(server())
@@ -207,7 +195,7 @@ describe('종목 (e2e)', () => {
 
   it('8. 기록이 있는 개인 종목을 삭제하면 409이다', async () => {
     const res = await request(server())
-      .delete(`/exercises/${customIdA}`)
+      .delete(`/exercises/${idA}`)
       .set(authOf(users.a))
       .expect(409);
 
@@ -218,63 +206,13 @@ describe('종목 (e2e)', () => {
 
   it('9. 기록이 없는 개인 종목은 삭제할 수 있다 (204)', async () => {
     await request(server())
-      .delete(`/exercises/${customIdB}`)
-      .set(authOf(users.b))
+      .delete(`/exercises/${idA2}`)
+      .set(authOf(users.a))
       .expect(204);
 
     const list = (
-      await request(server()).get('/exercises').set(authOf(users.b)).expect(200)
+      await request(server()).get('/exercises').set(authOf(users.a)).expect(200)
     ).body as ExerciseResponse[];
-    expect(list.map((exercise) => exercise.id)).not.toContain(customIdB);
-  });
-
-  it('10. 주간 통계 byExercise는 exercise_id 기준이라 이름이 같아도 id가 다르면 따로 집계한다', async () => {
-    // API로는 같은 이름의 개인 종목을 만들 수 없으므로 prisma로 직접 '러닝' 이름의 개인 종목을 만든다
-    const sameNameExercise = await prisma.exercises.create({
-      data: { owner_id: users.a.id, name: '러닝' },
-    });
-    const weekMonday = new Date(Date.UTC(2020, 0, 6)); // 기록이 없는 과거 주 (2020-01-06 월요일)
-    await prisma.records.createMany({
-      data: [
-        {
-          user_id: users.a.id,
-          exercise_id: BigInt(runningId),
-          duration_sec: 100,
-          start_image_url: DUMMY_IMAGE_URL,
-          end_image_url: DUMMY_IMAGE_URL,
-          record_date: weekMonday,
-        },
-        {
-          user_id: users.a.id,
-          exercise_id: sameNameExercise.id,
-          duration_sec: 200,
-          start_image_url: DUMMY_IMAGE_URL,
-          end_image_url: DUMMY_IMAGE_URL,
-          record_date: weekMonday,
-        },
-      ],
-    });
-
-    const res = await request(server())
-      .get('/stats/weekly')
-      .query({ weekStart: '2020-01-06' })
-      .set(authOf(users.a))
-      .expect(200);
-    const body = res.body as WeeklyStats;
-
-    expect(body.byExercise).toEqual([
-      {
-        exerciseId: sameNameExercise.id.toString(),
-        exerciseType: '러닝',
-        totalSeconds: 200,
-        count: 1,
-      },
-      {
-        exerciseId: runningId,
-        exerciseType: '러닝',
-        totalSeconds: 100,
-        count: 1,
-      },
-    ]);
+    expect(list.map((exercise) => exercise.id)).toEqual([idA]);
   });
 });

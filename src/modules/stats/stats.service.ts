@@ -20,7 +20,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // record_date + 종목 단위로 묶은 집계 행
 interface DailyExerciseRow {
   date: string;
-  exerciseId: string;
   exerciseType: string;
   totalSeconds: number;
   count: number;
@@ -102,7 +101,7 @@ export class StatsService {
     return comparableDays.reduce((sum, day) => sum + day.totalSeconds, 0);
   }
 
-  // [start, end] 범위의 내 기록을 한 번의 쿼리로 날짜/종목(exercise_id)별 합산 (duration_sec가 null이면 0으로 취급, count에는 포함)
+  // [start, end] 범위의 내 기록을 한 번의 쿼리로 날짜/종목(exercise_id)별 합산한 뒤 이름 기준으로 합친다 (duration_sec가 null이면 0으로 취급, count에는 포함)
   // 종목 이름은 집계에 나온 exercise_id들을 exercises에서 한 번에 조회해 채운다
   private async aggregateDailyByExercise(
     userId: string,
@@ -127,7 +126,6 @@ export class StatsService {
 
     return groups.map((group) => ({
       date: formatKstDate(group.record_date),
-      exerciseId: group.exercise_id.toString(),
       exerciseType: nameById.get(group.exercise_id) ?? '',
       totalSeconds: Number(group._sum.duration_sec ?? 0),
       count: Number(group._count._all),
@@ -159,20 +157,19 @@ export class StatsService {
     return days;
   }
 
-  // 종목(exercise_id)별 합산, 운동 시간 내림차순 (이름이 같아도 id가 다르면 따로 집계)
+  // 종목 "이름"별 합산, 운동 시간 내림차순 (개인 종목과 그룹 전용 종목처럼 id가 달라도 이름이 같으면 합산)
   private buildByExercise(rows: DailyExerciseRow[]): WeeklyExerciseStatsDto[] {
     const byExercise = new Map<string, WeeklyExerciseStatsDto>();
 
     for (const row of rows) {
-      const entry = byExercise.get(row.exerciseId) ?? {
-        exerciseId: row.exerciseId,
+      const entry = byExercise.get(row.exerciseType) ?? {
         exerciseType: row.exerciseType,
         totalSeconds: 0,
         count: 0,
       };
       entry.totalSeconds += row.totalSeconds;
       entry.count += row.count;
-      byExercise.set(row.exerciseId, entry);
+      byExercise.set(row.exerciseType, entry);
     }
 
     return [...byExercise.values()].sort(

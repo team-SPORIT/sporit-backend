@@ -517,17 +517,20 @@ model group_members {
 }
 
 model groups {
-  id             BigInt          @id @default(autoincrement())
-  name           String          @db.VarChar(50)
-  invite_code    String          @unique @db.VarChar(8)
-  max_members    Int             @default(10) @db.SmallInt
-  owner_id       String          @db.Uuid
-  created_at     DateTime        @default(now()) @db.Timestamptz(6)
-  last_shared_at DateTime?       @db.Timestamptz(6)
-  group_members  group_members[]
-  profiles       profiles        @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  record_shares  record_shares[]
-  wake_up_logs   wake_up_logs[]
+  id                  BigInt            @id @default(autoincrement())
+  name                String            @db.VarChar(50)
+  invite_code         String            @unique @db.VarChar(8)
+  max_members         Int               @default(10) @db.SmallInt
+  owner_id            String            @db.Uuid
+  created_at          DateTime          @default(now()) @db.Timestamptz(6)
+  last_shared_at      DateTime?         @db.Timestamptz(6)
+  allow_all_exercises Boolean           @default(true)
+  exercises           exercises[]
+  group_exercises     group_exercises[]
+  group_members       group_members[]
+  profiles            profiles          @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  record_shares       record_shares[]
+  wake_up_logs        wake_up_logs[]
 
   @@schema("public")
 }
@@ -712,14 +715,30 @@ model scim_users {
 
 model exercises {
   id                  BigInt                @id @default(autoincrement())
-  name                String                @unique(map: "uq_exercises_default_name", where: raw("(owner_id IS NULL)")) @db.VarChar(30)
+  name                String                @unique(map: "uq_exercises_default_name", where: raw("((owner_id IS NULL) AND (group_id IS NULL))")) @db.VarChar(30)
   owner_id            String?               @db.Uuid
   created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  group_id            BigInt?
+  groups              groups?               @relation(fields: [group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   profiles            profiles?             @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  group_exercises     group_exercises[]
   records             records[]
   user_exercise_stats user_exercise_stats[]
 
   @@unique([owner_id, name], map: "uq_exercises_owner_name", where: raw("(owner_id IS NOT NULL)"))
+  @@unique([group_id, name], map: "uq_exercises_group_name", where: raw("(group_id IS NOT NULL)"))
+  @@schema("public")
+}
+
+model group_exercises {
+  group_id    BigInt
+  exercise_id BigInt
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  exercises   exercises @relation(fields: [exercise_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  groups      groups    @relation(fields: [group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([group_id, exercise_id])
+  @@index([exercise_id], map: "idx_group_exercises_exercise")
   @@schema("public")
 }
 
