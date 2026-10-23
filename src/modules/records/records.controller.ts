@@ -53,9 +53,18 @@ export class RecordsController {
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['file', 'exerciseType'],
+      required: ['startFile', 'endFile', 'exerciseType'],
       properties: {
-        file: { type: 'string', format: 'binary', description: '운동 사진' },
+        startFile: {
+          type: 'string',
+          format: 'binary',
+          description: '운동 시작 사진',
+        },
+        endFile: {
+          type: 'string',
+          format: 'binary',
+          description: '운동 종료 사진',
+        },
         exerciseType: { type: 'string', description: '운동 종류' },
         durationMin: { type: 'number', description: '운동 시간(분)' },
         comment: { type: 'string', description: '코멘트' },
