@@ -12,6 +12,7 @@ import { RecordsModule } from './modules/records/records.module';
 import { SharesModule } from './modules/shares/shares.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { StatsModule } from './modules/stats/stats.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     SharesModule,
     ReactionsModule,
     NotificationsModule,
+    StatsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
