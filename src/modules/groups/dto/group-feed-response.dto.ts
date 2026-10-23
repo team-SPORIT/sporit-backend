@@ -33,6 +33,9 @@ export class FeedShareDto {
   @ApiProperty({ description: '시작 사진 URL' })
   startImageUrl: string;
 
+  @ApiProperty({ description: '종료 사진 URL' })
+  endImageUrl: string;
+
   @ApiProperty({ description: '운동 날짜' })
   recordDate: Date;
 
