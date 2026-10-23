@@ -24,6 +24,7 @@ import {
 import { ExercisesService } from './exercises.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { ExerciseResponseDto } from './dto/exercise-response.dto';
+import { SelectableExercisesResponseDto } from './dto/selectable-exercises-response.dto';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -44,6 +45,15 @@ export class ExercisesController {
   @ApiOkResponse({ type: ExerciseResponseDto, isArray: true })
   findAll(@CurrentUser() user: { id: string; email: string }) {
     return this.exercisesService.findAll(user.id);
+  }
+
+  // 기록 작성 화면용 선택 목록 (내 개인 종목 + 제한 있는 그룹의 허용 종목)
+  @Get('selectable')
+  @ApiOperation({ summary: '기록 작성 화면용 선택 가능 종목 조회' })
+  findSelectable(
+    @CurrentUser() user: { id: string; email: string },
+  ): Promise<SelectableExercisesResponseDto> {
+    return this.exercisesService.findSelectable(user.id);
   }
 
   // 개인 종목 추가

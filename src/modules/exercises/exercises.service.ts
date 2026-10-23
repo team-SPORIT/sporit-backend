@@ -6,11 +6,16 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { GroupsService } from '../groups/groups.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
+import { SelectableExercisesResponseDto } from './dto/selectable-exercises-response.dto';
 
 @Injectable()
 export class ExercisesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly groupsService: GroupsService,
+  ) {}
 
   // 종목 목록 조회: 기본 종목 + 내 종목. 기본 종목 먼저(id순), 내 종목은 등록순(id순)
   async findAll(userId: string) {
@@ -23,6 +28,25 @@ export class ExercisesService {
       ...exercise,
       isDefault: exercise.owner_id === null,
     }));
+  }
+
+  // 기록 작성 화면용 선택 목록: 내 개인 종목(mine) + 허용 종목이 설정된 내 그룹과 그 허용 종목(groups)
+  // 기본 종목 전체와 제한 없는 그룹은 포함하지 않는다
+  async findSelectable(
+    userId: string,
+  ): Promise<SelectableExercisesResponseDto> {
+    const [myExercises, groups] = await Promise.all([
+      this.prisma.exercises.findMany({
+        where: { owner_id: userId },
+        orderBy: { id: 'asc' },
+      }),
+      this.groupsService.findMyRestrictedGroupsWithExercises(userId),
+    ]);
+
+    return {
+      mine: myExercises.map(({ id, name }) => ({ id, name, isDefault: false })),
+      groups,
+    };
   }
 
   // 개인 종목 추가: 같은 이름의 기본 종목이 있거나 내 종목에 이미 있으면 409

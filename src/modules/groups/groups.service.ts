@@ -24,6 +24,12 @@ const INVITE_CODE_LENGTH = 8;
 const MAX_INVITE_CODE_ATTEMPTS = 5;
 const DEFAULT_MAX_MEMBERS = 10;
 
+// 내 그룹 목록 정렬: 최근 공유순(last_shared_at 내림차순, 공유가 없으면 맨 뒤), 같으면 참여 순
+const MY_GROUPS_ORDER_BY: Prisma.group_membersOrderByWithRelationInput[] = [
+  { groups: { last_shared_at: { sort: 'desc', nulls: 'last' } } },
+  { joined_at: 'asc' },
+];
+
 @Injectable()
 export class GroupsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -80,7 +86,7 @@ export class GroupsService {
     return group;
   }
 
-  // 내가 속한 그룹 목록: 최근 공유순(last_shared_at 내림차순, 공유가 없으면 맨 뒤), 같으면 참여 순
+  // 내가 속한 그룹 목록 (MY_GROUPS_ORDER_BY 정렬)
   async findMyGroups(userId: string) {
     const memberships = await this.prisma.group_members.findMany({
       where: { user_id: userId },
@@ -89,15 +95,45 @@ export class GroupsService {
           include: { _count: { select: { group_members: true } } },
         },
       },
-      orderBy: [
-        { groups: { last_shared_at: { sort: 'desc', nulls: 'last' } } },
-        { joined_at: 'asc' },
-      ],
+      orderBy: MY_GROUPS_ORDER_BY,
     });
     return memberships.map(({ groups }) => {
       const { _count, ...group } = groups;
       return { ...group, memberCount: _count.group_members };
     });
+  }
+
+  // 내가 속한 그룹 중 허용 종목이 설정된(제한 있는) 그룹과 그 허용 종목 (내 그룹 목록과 같은 정렬)
+  // 그룹 목록, 허용 종목을 한 번의 쿼리로 가져온다 (N+1 방지)
+  async findMyRestrictedGroupsWithExercises(userId: string) {
+    const memberships = await this.prisma.group_members.findMany({
+      where: { user_id: userId, groups: { group_exercises: { some: {} } } },
+      include: {
+        groups: {
+          select: {
+            id: true,
+            name: true,
+            group_exercises: {
+              include: {
+                exercises: { select: { id: true, name: true, owner_id: true } },
+              },
+              orderBy: { exercise_id: 'asc' },
+            },
+          },
+        },
+      },
+      orderBy: MY_GROUPS_ORDER_BY,
+    });
+
+    return memberships.map(({ groups }) => ({
+      groupId: groups.id,
+      groupName: groups.name,
+      exercises: groups.group_exercises.map(({ exercises }) => ({
+        id: exercises.id,
+        name: exercises.name,
+        isDefault: exercises.owner_id === null,
+      })),
+    }));
   }
 
   // 그룹 상세 (멤버만 조회 가능)
