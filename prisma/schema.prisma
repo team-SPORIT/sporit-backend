@@ -536,22 +536,24 @@ model groups {
 }
 
 model profiles {
-  id                                            String                @id @db.Uuid
-  nickname                                      String                @db.VarChar(50)
-  profile_image                                 String?               @db.VarChar(500)
-  created_at                                    DateTime              @default(now()) @db.Timestamptz(6)
-  updated_at                                    DateTime              @default(now()) @db.Timestamptz(6)
-  theme                                         theme_type            @default(blue)
+  id                                            String                  @id @db.Uuid
+  nickname                                      String                  @db.VarChar(50)
+  profile_image                                 String?                 @db.VarChar(500)
+  created_at                                    DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at                                    DateTime                @default(now()) @db.Timestamptz(6)
+  theme                                         theme_type              @default(blue)
+  exercise_categories                           exercise_categories[]
+  exercise_category_map                         exercise_category_map[]
   exercises                                     exercises[]
   group_members                                 group_members[]
   groups                                        groups[]
-  users                                         users                 @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                                         users                   @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   record_comments                               record_comments[]
   record_reactions                              record_reactions[]
   records                                       records[]
   user_exercise_stats                           user_exercise_stats[]
-  wake_up_logs_wake_up_logs_sender_idToprofiles wake_up_logs[]        @relation("wake_up_logs_sender_idToprofiles")
-  wake_up_logs_wake_up_logs_target_idToprofiles wake_up_logs[]        @relation("wake_up_logs_target_idToprofiles")
+  wake_up_logs_wake_up_logs_sender_idToprofiles wake_up_logs[]          @relation("wake_up_logs_sender_idToprofiles")
+  wake_up_logs_wake_up_logs_target_idToprofiles wake_up_logs[]          @relation("wake_up_logs_target_idToprofiles")
 
   @@schema("public")
 }
@@ -739,6 +741,31 @@ model group_exercises {
 
   @@id([group_id, exercise_id])
   @@index([exercise_id], map: "idx_group_exercises_exercise")
+  @@schema("public")
+}
+
+model exercise_categories {
+  id                    BigInt                  @id @default(autoincrement())
+  user_id               String                  @db.Uuid
+  name                  String                  @db.VarChar(20)
+  color                 String                  @db.VarChar(20)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  profiles              profiles                @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  exercise_category_map exercise_category_map[]
+
+  @@unique([user_id, name])
+  @@schema("public")
+}
+
+model exercise_category_map {
+  user_id             String              @db.Uuid
+  exercise_name       String              @db.VarChar(30)
+  category_id         BigInt
+  exercise_categories exercise_categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  profiles            profiles            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([user_id, exercise_name])
+  @@index([category_id], map: "idx_category_map_category")
   @@schema("public")
 }
 

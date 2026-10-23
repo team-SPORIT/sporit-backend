@@ -13,6 +13,7 @@ import { SharesModule } from './modules/shares/shares.module';
 import { ReactionsModule } from './modules/reactions/reactions.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { StatsModule } from './modules/stats/stats.module';
+import { CategoriesModule } from './modules/categories/categories.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { StatsModule } from './modules/stats/stats.module';
     ReactionsModule,
     NotificationsModule,
     StatsModule,
+    CategoriesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
