@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,25 +12,36 @@ import { CreateExerciseDto } from './dto/create-exercise.dto';
 export class ExercisesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 내 종목 목록 조회 (등록 순)
-  async findMe(userId: string) {
-    return this.prisma.exercises.findMany({
-      where: { owner_id: userId },
-      orderBy: { created_at: 'asc' },
+  // 종목 목록 조회: 기본 종목 + 내 종목. 기본 종목 먼저(id순), 내 종목은 등록순(id순)
+  async findAll(userId: string) {
+    const exercises = await this.prisma.exercises.findMany({
+      where: { OR: [{ owner_id: null }, { owner_id: userId }] },
+      orderBy: [{ owner_id: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
     });
+
+    return exercises.map((exercise) => ({
+      ...exercise,
+      isDefault: exercise.owner_id === null,
+    }));
   }
 
-  // 종목 추가
+  // 개인 종목 추가: 같은 이름의 기본 종목이 있거나 내 종목에 이미 있으면 409
   async create(userId: string, dto: CreateExerciseDto) {
+    const defaultExercise = await this.prisma.exercises.findFirst({
+      where: { owner_id: null, name: dto.name },
+      select: { id: true },
+    });
+    if (defaultExercise) {
+      throw new ConflictException('이미 존재하는 기본 종목입니다.');
+    }
+
     try {
-      return await this.prisma.exercises.create({
-        data: {
-          owner_id: userId,
-          name: dto.name,
-        },
+      const exercise = await this.prisma.exercises.create({
+        data: { owner_id: userId, name: dto.name },
       });
+      return { ...exercise, isDefault: false };
     } catch (error) {
-      // P2002: @@unique([user_id, name]) 위반 -> 이미 등록된 종목
+      // P2002: (owner_id, name) 유니크 위반 -> 이미 등록된 내 종목
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
@@ -40,16 +52,28 @@ export class ExercisesService {
     }
   }
 
-  // 종목 삭제 (본인 소유만)
+  // 개인 종목 삭제 (내 종목만): 없으면 404, 기본 종목이거나 남의 종목이면 403,
+  // 기록이 참조 중이라 FK로 삭제할 수 없으면 409
   async remove(userId: string, id: bigint) {
-    const exercise = await this.prisma.exercises.findUnique({
-      where: { id },
-    });
-
-    if (!exercise || exercise.owner_id !== userId) {
+    const exercise = await this.prisma.exercises.findUnique({ where: { id } });
+    if (!exercise) {
       throw new NotFoundException('종목을 찾을 수 없습니다.');
     }
+    if (exercise.owner_id !== userId) {
+      throw new ForbiddenException('내가 추가한 종목만 삭제할 수 있습니다.');
+    }
 
-    await this.prisma.exercises.delete({ where: { id } });
+    try {
+      await this.prisma.exercises.delete({ where: { id } });
+    } catch (error) {
+      // P2003: records가 이 종목을 참조 중 (FK RESTRICT)
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2003'
+      ) {
+        throw new ConflictException('기록이 있는 종목은 삭제할 수 없습니다.');
+      }
+      throw error;
+    }
   }
 }

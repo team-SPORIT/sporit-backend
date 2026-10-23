@@ -23,16 +23,16 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class ExercisesController {
   constructor(private readonly exercisesService: ExercisesService) {}
 
-  // 내 종목 목록 조회
-  @Get('me')
-  @ApiOperation({ summary: '내 종목 목록 조회' })
-  findMe(@CurrentUser() user: { id: string; email: string }) {
-    return this.exercisesService.findMe(user.id);
+  // 종목 목록 조회 (기본 종목 + 내 종목)
+  @Get()
+  @ApiOperation({ summary: '종목 목록 조회 (기본 종목 + 내 종목)' })
+  findAll(@CurrentUser() user: { id: string; email: string }) {
+    return this.exercisesService.findAll(user.id);
   }
 
-  // 종목 추가
+  // 개인 종목 추가
   @Post()
-  @ApiOperation({ summary: '종목 추가' })
+  @ApiOperation({ summary: '개인 종목 추가' })
   create(
     @CurrentUser() user: { id: string; email: string },
     @Body() createExerciseDto: CreateExerciseDto,
@@ -40,10 +40,10 @@ export class ExercisesController {
     return this.exercisesService.create(user.id, createExerciseDto);
   }
 
-  // 종목 삭제 (본인 소유만)
+  // 개인 종목 삭제 (내 종목만)
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: '종목 삭제' })
+  @ApiOperation({ summary: '개인 종목 삭제' })
   remove(
     @CurrentUser() user: { id: string; email: string },
     @Param('id') id: string,
