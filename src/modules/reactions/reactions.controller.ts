@@ -8,7 +8,15 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ReactionsService } from './reactions.service';
@@ -24,6 +32,12 @@ export class ReactionsController {
   @Put()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: '공유된 기록에 좋아요' })
+  @ApiParam({ name: 'shareId', description: '공유 ID' })
+  @ApiNoContentResponse({ description: '좋아요 완료(이미 눌렀어도 성공)' })
+  @ApiForbiddenResponse({
+    description: '그룹 멤버가 아니거나 오늘 공유 전(잠금)',
+  })
+  @ApiNotFoundResponse({ description: '공유를 찾을 수 없음' })
   like(
     @CurrentUser() user: { id: string; email: string },
     @Param('shareId') shareId: string,
@@ -35,6 +49,14 @@ export class ReactionsController {
   @Delete()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: '공유된 기록 좋아요 취소' })
+  @ApiParam({ name: 'shareId', description: '공유 ID' })
+  @ApiNoContentResponse({
+    description: '좋아요 취소 완료(누르지 않았어도 성공)',
+  })
+  @ApiForbiddenResponse({
+    description: '그룹 멤버가 아니거나 오늘 공유 전(잠금)',
+  })
+  @ApiNotFoundResponse({ description: '공유를 찾을 수 없음' })
   unlike(
     @CurrentUser() user: { id: string; email: string },
     @Param('shareId') shareId: string,
