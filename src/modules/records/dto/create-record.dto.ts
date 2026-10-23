@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -17,12 +18,17 @@ export class CreateRecordDto {
   @MaxLength(30)
   exerciseType: string;
 
-  @ApiPropertyOptional({ description: '운동 시간(분)', minimum: 0 })
+  @ApiPropertyOptional({
+    description: '운동 시간(초)',
+    minimum: 0,
+    maximum: 86400,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  durationMin?: number;
+  @Max(86400)
+  durationSec?: number;
 
   @ApiPropertyOptional({ description: '코멘트', maxLength: 200 })
   @IsOptional()

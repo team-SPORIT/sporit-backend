@@ -34,12 +34,14 @@ interface GroupDetailResponse {
 
 interface RecordResponse {
   id: string;
+  duration_sec: number;
   start_image_url: string;
   end_image_url: string;
 }
 
 interface FeedShare {
   author: { id: string };
+  durationSec: number | null;
   startImageUrl: string;
   endImageUrl: string;
 }
@@ -154,13 +156,14 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .post('/records')
       .set('Authorization', `Bearer ${tokenA}`)
       .field('exerciseType', '러닝')
-      .field('durationMin', '30')
+      .field('durationSec', '1800')
       .attach('startFile', TEST_IMAGE_PATH)
       .attach('endFile', TEST_IMAGE_PATH)
       .expect(201);
 
     const body = res.body as RecordResponse;
     expect(body.id).toBeDefined();
+    expect(body.duration_sec).toBe(1800);
     expect(body.start_image_url).toEqual(expect.any(String));
     expect(body.end_image_url).toEqual(expect.any(String));
     expect(body.start_image_url).not.toBe(body.end_image_url);
@@ -172,6 +175,30 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .expect(200);
 
     expect((profileRes.body as ProfileResponse).current_streak).toBe(1);
+  });
+
+  it('5-2. 기록 생성 후 user_exercise_stats.total_seconds가 durationSec만큼 증가한다', async () => {
+    const stats = await prisma.user_exercise_stats.findUnique({
+      where: {
+        user_id_exercise_type: { user_id: userAId, exercise_type: '러닝' },
+      },
+    });
+
+    expect(stats?.total_seconds).toBe(1800);
+    expect(stats?.total_count).toBe(1);
+  });
+
+  it('5-3. durationSec가 음수이거나 86401 이상이면 POST /records는 400이다', async () => {
+    for (const durationSec of ['-1', '86401']) {
+      await request(app.getHttpServer())
+        .post('/records')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .field('exerciseType', '러닝')
+        .field('durationSec', durationSec)
+        .attach('startFile', TEST_IMAGE_PATH)
+        .attach('endFile', TEST_IMAGE_PATH)
+        .expect(400);
+    }
   });
 
   it('5-1. startFile 또는 endFile 한쪽만 보내면 POST /records는 400이다', async () => {
@@ -210,7 +237,7 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .post('/records')
       .set('Authorization', `Bearer ${tokenB}`)
       .field('exerciseType', '요가')
-      .field('durationMin', '20')
+      .field('durationSec', '1200')
       .attach('startFile', TEST_IMAGE_PATH)
       .attach('endFile', TEST_IMAGE_PATH)
       .expect(201);
@@ -240,6 +267,9 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     expect(body.locked).toBe(false);
     expect(body.records).toHaveLength(2);
     expect(body.records.map((record) => record.author.id)).toContain(userAId);
+    expect(body.records.map((record) => record.durationSec).sort()).toEqual([
+      1200, 1800,
+    ]);
     for (const record of body.records) {
       expect(record.startImageUrl).toEqual(expect.any(String));
       expect(record.endImageUrl).toEqual(expect.any(String));

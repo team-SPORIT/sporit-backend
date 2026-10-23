@@ -66,7 +66,12 @@ export class RecordsController {
           description: '운동 종료 사진',
         },
         exerciseType: { type: 'string', description: '운동 종류' },
-        durationMin: { type: 'number', description: '운동 시간(분)' },
+        durationSec: {
+          type: 'number',
+          minimum: 0,
+          maximum: 86400,
+          description: '운동 시간(초)',
+        },
         comment: { type: 'string', description: '코멘트' },
       },
     },

@@ -57,7 +57,7 @@ export class RecordsService {
         data: {
           user_id: userId,
           exercise_type: dto.exerciseType,
-          duration_min: dto.durationMin,
+          duration_sec: dto.durationSec,
           comment: dto.comment,
           start_image_url: startImageUrl,
           end_image_url: endImageUrl,
@@ -70,7 +70,7 @@ export class RecordsService {
         tx,
         userId,
         dto.exerciseType,
-        dto.durationMin,
+        dto.durationSec,
       );
 
       return record;
@@ -217,12 +217,12 @@ export class RecordsService {
     });
   }
 
-  // 종목별 통계 upsert: 횟수 +1, 시간 누적
+  // 종목별 통계 upsert: 횟수 +1, 시간(초) 누적 (값이 없으면 0)
   private async upsertExerciseStats(
     tx: Prisma.TransactionClient,
     userId: string,
     exerciseType: string,
-    durationMin?: number,
+    durationSec?: number,
   ) {
     await tx.user_exercise_stats.upsert({
       where: {
@@ -231,12 +231,12 @@ export class RecordsService {
       create: {
         user_id: userId,
         exercise_type: exerciseType,
-        total_minutes: durationMin ?? 0,
+        total_seconds: durationSec ?? 0,
         total_count: 1,
         last_at: new Date(),
       },
       update: {
-        total_minutes: { increment: durationMin ?? 0 },
+        total_seconds: { increment: durationSec ?? 0 },
         total_count: { increment: 1 },
         last_at: new Date(),
       },

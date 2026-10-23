@@ -171,7 +171,7 @@ export class GroupsService {
         shareId: share.id,
         recordId: share.record_id,
         exerciseType: share.records.exercise_type,
-        durationMin: share.records.duration_min,
+        durationSec: share.records.duration_sec,
         comment: share.records.comment,
         startImageUrl: share.records.start_image_url,
         endImageUrl: share.records.end_image_url,
