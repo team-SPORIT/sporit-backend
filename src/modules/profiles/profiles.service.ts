@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../common/supabase/supabase.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -83,10 +84,47 @@ export class ProfilesService {
     });
   }
 
-  // 회원 탈퇴: Supabase 계정(auth.users)을 삭제하면 profiles 이하 데이터가 DB의 CASCADE로 함께 삭제된다.
+  // 회원 탈퇴 처리 순서:
+  // 1. [DB 트랜잭션] 내가 그룹장인 그룹 정리 (여러 번 실행해도 안전: 위임/삭제가 끝난 그룹은 더 이상 내 그룹이 아니다)
+  // 2. Supabase 계정(auth.users) 삭제 -> profiles 이하 데이터는 DB의 CASCADE로 함께 삭제된다. 실패하면 500
   // 프로필이 이미 없는 경우(JWT는 유효하지만 계정/프로필이 없음)에도 에러 없이 성공으로 처리해 재시도해도 안전하다(멱등).
   async withdraw(userId: string) {
+    await this.handleOwnedGroups(userId);
     await this.deleteAuthUser(userId);
+  }
+
+  // 내가 그룹장(owner_id)인 모든 그룹을 처리한다. 그룹장이 지워지면 groups가 CASCADE로 통째로 삭제되어
+  // 다른 멤버의 공유/댓글까지 사라지므로, 계정을 지우기 전에 먼저 처리해야 한다.
+  // - 다른 멤버가 있으면: 가장 먼저 가입한 멤버(joined_at 오름차순, 같으면 user_id 오름차순)에게 그룹장을 위임
+  // - 나 혼자뿐이면: 그룹 삭제
+  private async handleOwnedGroups(userId: string) {
+    await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const ownedGroups = await tx.groups.findMany({
+          where: { owner_id: userId },
+          select: { id: true },
+        });
+
+        for (const { id: groupId } of ownedGroups) {
+          const nextOwner = await tx.group_members.findFirst({
+            where: { group_id: groupId, user_id: { not: userId } },
+            orderBy: [{ joined_at: 'asc' }, { user_id: 'asc' }],
+            select: { user_id: true },
+          });
+
+          if (nextOwner) {
+            await tx.groups.update({
+              where: { id: groupId },
+              data: { owner_id: nextOwner.user_id },
+            });
+          } else {
+            await tx.groups.delete({ where: { id: groupId } });
+          }
+        }
+      },
+      // 그룹이 많은 경우를 고려해 기본 제한 시간(5초)보다 넉넉하게 둔다
+      { timeout: 30_000 },
+    );
   }
 
   // Supabase 계정 삭제(service_role). 이미 없는 계정이면 성공으로 보고, 그 외 실패는 500으로 던져 탈퇴 실패를 알린다
