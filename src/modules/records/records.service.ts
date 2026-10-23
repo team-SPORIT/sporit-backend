@@ -217,7 +217,7 @@ export class RecordsService {
     });
   }
 
-  // 종목별 통계 upsert: 횟수 +1, 시간 누적
+  // 종목별 통계 upsert: 횟수 +1, 시간(초) 누적 (값이 없으면 0)
   private async upsertExerciseStats(
     tx: Prisma.TransactionClient,
     userId: string,

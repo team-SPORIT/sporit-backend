@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -22,6 +23,7 @@ export class CreateRecordDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(86400)
   durationSec?: number;
 
   @ApiPropertyOptional({ description: '코멘트', maxLength: 200 })
