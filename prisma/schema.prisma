@@ -151,21 +151,22 @@ model mfa_challenges {
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model mfa_factors {
-  id                           String           @id @db.Uuid
-  user_id                      String           @db.Uuid
+  id                           String                  @id @db.Uuid
+  user_id                      String                  @db.Uuid
   friendly_name                String?
   factor_type                  factor_type
   status                       factor_status
-  created_at                   DateTime         @db.Timestamptz(6)
-  updated_at                   DateTime         @db.Timestamptz(6)
+  created_at                   DateTime                @db.Timestamptz(6)
+  updated_at                   DateTime                @db.Timestamptz(6)
   secret                       String?
   phone                        String?
-  last_challenged_at           DateTime?        @unique @db.Timestamptz(6)
+  last_challenged_at           DateTime?               @unique @db.Timestamptz(6)
   web_authn_credential         Json?
-  web_authn_aaguid             String?          @db.Uuid
+  web_authn_aaguid             String?                 @db.Uuid
   last_webauthn_challenge_data Json?
   mfa_challenges               mfa_challenges[]
-  users                        users            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                        users                   @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  mfa_recovery_code_sets       mfa_recovery_code_sets?
 
   @@unique([friendly_name, user_id], map: "mfa_factors_user_friendly_name_unique", where: raw("(TRIM(BOTH FROM friendly_name) <> ''::text)"))
   @@unique([user_id, phone], map: "unique_phone_factor_per_user")
@@ -262,6 +263,7 @@ model one_time_tokens {
   relates_to String
   created_at DateTime            @default(now()) @db.Timestamp(6)
   updated_at DateTime            @default(now()) @db.Timestamp(6)
+  expires_at DateTime?           @db.Timestamptz(6)
   users      users               @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([user_id, token_type])
@@ -399,6 +401,8 @@ model sso_providers {
   disabled          Boolean?
   saml_providers    saml_providers[]
   saml_relay_states saml_relay_states[]
+  scim_tokens       scim_tokens[]
+  scim_users        scim_users[]
   sso_domains       sso_domains[]
 
   @@index([resource_id], map: "sso_providers_resource_id_pattern_idx")
@@ -410,46 +414,48 @@ model sso_providers {
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 /// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model users {
-  instance_id                 String?                @db.Uuid
-  id                          String                 @id @db.Uuid
-  aud                         String?                @db.VarChar(255)
-  role                        String?                @db.VarChar(255)
-  email                       String?                @unique(map: "users_email_partial_key", where: raw("(is_sso_user = false)")) @db.VarChar(255)
-  encrypted_password          String?                @db.VarChar(255)
-  email_confirmed_at          DateTime?              @db.Timestamptz(6)
-  invited_at                  DateTime?              @db.Timestamptz(6)
-  confirmation_token          String?                @unique(map: "confirmation_token_idx", where: raw("((confirmation_token)::text !~ '^[0-9 ]*$'::text)")) @db.VarChar(255)
-  confirmation_sent_at        DateTime?              @db.Timestamptz(6)
-  recovery_token              String?                @unique(map: "recovery_token_idx", where: raw("((recovery_token)::text !~ '^[0-9 ]*$'::text)")) @db.VarChar(255)
-  recovery_sent_at            DateTime?              @db.Timestamptz(6)
-  email_change_token_new      String?                @unique(map: "email_change_token_new_idx", where: raw("((email_change_token_new)::text !~ '^[0-9 ]*$'::text)")) @db.VarChar(255)
-  email_change                String?                @db.VarChar(255)
-  email_change_sent_at        DateTime?              @db.Timestamptz(6)
-  last_sign_in_at             DateTime?              @db.Timestamptz(6)
+  instance_id                 String?                 @db.Uuid
+  id                          String                  @id @db.Uuid
+  aud                         String?                 @db.VarChar(255)
+  role                        String?                 @db.VarChar(255)
+  email                       String?                 @unique(map: "users_email_partial_key", where: raw("(is_sso_user = false)")) @db.VarChar(255)
+  encrypted_password          String?                 @db.VarChar(255)
+  email_confirmed_at          DateTime?               @db.Timestamptz(6)
+  invited_at                  DateTime?               @db.Timestamptz(6)
+  confirmation_token          String?                 @unique(map: "confirmation_token_idx", where: raw("((confirmation_token)::text !~ '^[0-9 ]*$'::text)")) @db.VarChar(255)
+  confirmation_sent_at        DateTime?               @db.Timestamptz(6)
+  recovery_token              String?                 @unique(map: "recovery_token_idx", where: raw("((recovery_token)::text !~ '^[0-9 ]*$'::text)")) @db.VarChar(255)
+  recovery_sent_at            DateTime?               @db.Timestamptz(6)
+  email_change_token_new      String?                 @unique(map: "email_change_token_new_idx", where: raw("((email_change_token_new)::text !~ '^[0-9 ]*$'::text)")) @db.VarChar(255)
+  email_change                String?                 @db.VarChar(255)
+  email_change_sent_at        DateTime?               @db.Timestamptz(6)
+  last_sign_in_at             DateTime?               @db.Timestamptz(6)
   raw_app_meta_data           Json?
   raw_user_meta_data          Json?
   is_super_admin              Boolean?
-  created_at                  DateTime?              @db.Timestamptz(6)
-  updated_at                  DateTime?              @db.Timestamptz(6)
-  phone                       String?                @unique
-  phone_confirmed_at          DateTime?              @db.Timestamptz(6)
-  phone_change                String?                @default("")
-  phone_change_token          String?                @default("") @db.VarChar(255)
-  phone_change_sent_at        DateTime?              @db.Timestamptz(6)
-  confirmed_at                DateTime?              @default(dbgenerated("LEAST(email_confirmed_at, phone_confirmed_at)")) @db.Timestamptz(6)
-  email_change_token_current  String?                @unique(map: "email_change_token_current_idx", where: raw("((email_change_token_current)::text !~ '^[0-9 ]*$'::text)")) @default("") @db.VarChar(255)
-  email_change_confirm_status Int?                   @default(0) @db.SmallInt
-  banned_until                DateTime?              @db.Timestamptz(6)
-  reauthentication_token      String?                @unique(map: "reauthentication_token_idx", where: raw("((reauthentication_token)::text !~ '^[0-9 ]*$'::text)")) @default("") @db.VarChar(255)
-  reauthentication_sent_at    DateTime?              @db.Timestamptz(6)
-  is_sso_user                 Boolean                @default(false)
-  deleted_at                  DateTime?              @db.Timestamptz(6)
-  is_anonymous                Boolean                @default(false)
+  created_at                  DateTime?               @db.Timestamptz(6)
+  updated_at                  DateTime?               @db.Timestamptz(6)
+  phone                       String?                 @unique
+  phone_confirmed_at          DateTime?               @db.Timestamptz(6)
+  phone_change                String?                 @default("")
+  phone_change_token          String?                 @default("") @db.VarChar(255)
+  phone_change_sent_at        DateTime?               @db.Timestamptz(6)
+  confirmed_at                DateTime?               @default(dbgenerated("LEAST(email_confirmed_at, phone_confirmed_at)")) @db.Timestamptz(6)
+  email_change_token_current  String?                 @unique(map: "email_change_token_current_idx", where: raw("((email_change_token_current)::text !~ '^[0-9 ]*$'::text)")) @default("") @db.VarChar(255)
+  email_change_confirm_status Int?                    @default(0) @db.SmallInt
+  banned_until                DateTime?               @db.Timestamptz(6)
+  reauthentication_token      String?                 @unique(map: "reauthentication_token_idx", where: raw("((reauthentication_token)::text !~ '^[0-9 ]*$'::text)")) @default("") @db.VarChar(255)
+  reauthentication_sent_at    DateTime?               @db.Timestamptz(6)
+  is_sso_user                 Boolean                 @default(false)
+  deleted_at                  DateTime?               @db.Timestamptz(6)
+  is_anonymous                Boolean                 @default(false)
   identities                  identities[]
   mfa_factors                 mfa_factors[]
+  mfa_recovery_code_sets      mfa_recovery_code_sets?
   oauth_authorizations        oauth_authorizations[]
   oauth_consents              oauth_consents[]
   one_time_tokens             one_time_tokens[]
+  scim_users                  scim_users[]
   sessions                    sessions[]
   webauthn_challenges         webauthn_challenges[]
   webauthn_credentials        webauthn_credentials[]
@@ -520,7 +526,7 @@ model groups {
   current_streak       Int             @default(0)
   last_all_shared_date DateTime?       @db.Date
   group_members        group_members[]
-  profiles             profiles        @relation(fields: [owner_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  profiles             profiles        @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   record_shares        record_shares[]
   wake_up_logs         wake_up_logs[]
 
@@ -635,11 +641,83 @@ model wake_up_logs {
   target_id                                 String   @db.Uuid
   sent_date                                 DateTime @db.Date
   groups                                    groups   @relation(fields: [group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  profiles_wake_up_logs_sender_idToprofiles profiles @relation("wake_up_logs_sender_idToprofiles", fields: [sender_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  profiles_wake_up_logs_target_idToprofiles profiles @relation("wake_up_logs_target_idToprofiles", fields: [target_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  profiles_wake_up_logs_sender_idToprofiles profiles @relation("wake_up_logs_sender_idToprofiles", fields: [sender_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  profiles_wake_up_logs_target_idToprofiles profiles @relation("wake_up_logs_target_idToprofiles", fields: [target_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([group_id, sender_id, target_id, sent_date])
   @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model mfa_recovery_code_sets {
+  id                        String               @id @db.Uuid
+  user_id                   String               @unique @db.Uuid
+  mfa_factor_id             String               @unique @db.Uuid
+  failed_verification_count Int                  @default(0)
+  verification_locked_until DateTime?            @db.Timestamptz(6)
+  created_at                DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime             @default(now()) @db.Timestamptz(6)
+  mfa_factors               mfa_factors          @relation(fields: [mfa_factor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                     users                @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  mfa_recovery_codes        mfa_recovery_codes[]
+
+  @@schema("auth")
+}
+
+model mfa_recovery_codes {
+  id                       String                 @id @db.Uuid
+  mfa_recovery_code_set_id String                 @db.Uuid
+  code_hash                String
+  consumed_at              DateTime?              @db.Timestamptz(6)
+  created_at               DateTime               @default(now()) @db.Timestamptz(6)
+  mfa_recovery_code_sets   mfa_recovery_code_sets @relation(fields: [mfa_recovery_code_set_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([mfa_recovery_code_set_id], map: "mfa_recovery_codes_set_id_idx")
+  @@schema("auth")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model scim_tokens {
+  id              String        @id @db.Uuid
+  sso_provider_id String        @db.Uuid
+  token_hash      String        @unique
+  prefix          String
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  expires_at      DateTime?     @db.Timestamptz(6)
+  revoked_at      DateTime?     @db.Timestamptz(6)
+  last_used_at    DateTime?     @db.Timestamptz(6)
+  sso_providers   sso_providers @relation(fields: [sso_provider_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expires_at])
+  @@index([revoked_at])
+  @@index([sso_provider_id])
+  @@schema("auth")
+}
+
+model scim_users {
+  id              String        @id @db.Uuid
+  sso_provider_id String        @db.Uuid
+  user_id         String?       @db.Uuid
+  resource        Json
+  user_name       String        @default(dbgenerated("lower((resource ->> 'userName'::text))"))
+  external_id     String?       @default(dbgenerated("(resource ->> 'externalId'::text)"))
+  active          Boolean       @default(dbgenerated("COALESCE(((resource ->> 'active'::text))::boolean, true)"))
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  deleted_at      DateTime?     @db.Timestamptz(6)
+  sso_providers   sso_providers @relation(fields: [sso_provider_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?        @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@unique([sso_provider_id, external_id], map: "scim_users_external_id_key", where: raw("((external_id IS NOT NULL) AND (deleted_at IS NULL))"))
+  @@unique([sso_provider_id, user_name], map: "scim_users_user_name_key", where: raw("(deleted_at IS NULL)"))
+  @@index([sso_provider_id, created_at, id], map: "scim_users_created_at_idx", where: raw("(deleted_at IS NULL)"))
+  @@index([deleted_at])
+  @@index([sso_provider_id, id], map: "scim_users_id_idx", where: raw("(deleted_at IS NULL)"))
+  @@index([sso_provider_id])
+  @@index([sso_provider_id, updated_at, id], map: "scim_users_updated_at_idx", where: raw("(deleted_at IS NULL)"))
+  @@index([user_id])
+  @@index([sso_provider_id, user_name, id], map: "scim_users_user_name_idx", where: raw("(deleted_at IS NULL)"))
+  @@schema("auth")
 }
 
 enum aal_level {
@@ -668,6 +746,7 @@ enum factor_type {
   totp
   webauthn
   phone
+  recovery_code
 
   @@schema("auth")
 }

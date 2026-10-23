@@ -82,10 +82,17 @@ export class GroupsService {
   async findMyGroups(userId: string) {
     const memberships = await this.prisma.group_members.findMany({
       where: { user_id: userId },
-      include: { groups: true },
+      include: {
+        groups: {
+          include: { _count: { select: { group_members: true } } },
+        },
+      },
       orderBy: { joined_at: 'asc' },
     });
-    return memberships.map((membership) => membership.groups);
+    return memberships.map(({ groups }) => {
+      const { _count, ...group } = groups;
+      return { ...group, memberCount: _count.group_members };
+    });
   }
 
   // 그룹 상세 (멤버만 조회 가능)
