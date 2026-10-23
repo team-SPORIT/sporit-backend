@@ -22,7 +22,7 @@ export class CreateRecordDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  durationMin?: number;
+  durationSec?: number;
 
   @ApiPropertyOptional({ description: '코멘트', maxLength: 200 })
   @IsOptional()
