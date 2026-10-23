@@ -13,7 +13,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -87,7 +90,13 @@ export class GroupsController {
 
   // 그룹 허용 종목 조회 (멤버만 가능)
   @Get(':id/exercises')
-  @ApiOperation({ summary: '그룹 허용 종목 조회' })
+  @ApiOperation({
+    summary: '그룹 허용 종목 조회',
+    description:
+      '허용 종목이 설정되지 않은 그룹은 restricted=false(제한 없음)이고 exercises는 빈 배열이다.',
+  })
+  @ApiOkResponse({ type: GroupExercisesResponseDto })
+  @ApiForbiddenResponse({ description: '그룹 멤버가 아님' })
   getExercises(
     @CurrentUser() user: { id: string; email: string },
     @Param('id') id: string,
@@ -97,7 +106,18 @@ export class GroupsController {
 
   // 그룹 허용 종목 전체 교체 (그룹장만, 빈 배열이면 제한 없음)
   @Put(':id/exercises')
-  @ApiOperation({ summary: '그룹 허용 종목 설정 (전체 교체)' })
+  @ApiOperation({
+    summary: '그룹 허용 종목 설정 (전체 교체)',
+    description:
+      '그룹장만 가능. 기본 종목만 허용할 수 있고, 빈 배열이면 제한 없음. 이미 공유된 기록에는 영향이 없다.',
+  })
+  @ApiOkResponse({ type: GroupExercisesResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      '존재하지 않거나 기본 종목이 아닌 종목 포함, 배열 형식/개수(최대 50) 오류',
+  })
+  @ApiForbiddenResponse({ description: '그룹장이 아님' })
+  @ApiNotFoundResponse({ description: '그룹을 찾을 수 없음' })
   setExercises(
     @CurrentUser() user: { id: string; email: string },
     @Param('id') id: string,

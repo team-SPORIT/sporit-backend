@@ -9,7 +9,14 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiConflictResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateShareDto } from './dto/create-share.dto';
@@ -24,7 +31,17 @@ export class SharesController {
 
   // 기록을 그룹에 공유
   @Post()
-  @ApiOperation({ summary: '기록을 그룹에 공유' })
+  @ApiOperation({
+    summary: '기록을 그룹에 공유',
+    description:
+      '한 번에 한 그룹에 공유한다. 그룹에 허용 종목이 설정되어 있으면 기록의 종목이 허용 목록에 있어야 한다.',
+  })
+  @ApiNotFoundResponse({ description: '기록을 찾을 수 없음' })
+  @ApiForbiddenResponse({
+    description:
+      '본인 기록이 아니거나, 그룹 멤버가 아니거나, 이 그룹에서 허용되지 않은 종목',
+  })
+  @ApiConflictResponse({ description: '이미 이 그룹에 공유한 기록' })
   create(
     @CurrentUser() user: { id: string; email: string },
     @Body() createShareDto: CreateShareDto,
