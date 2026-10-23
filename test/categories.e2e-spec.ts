@@ -2,10 +2,8 @@ import 'dotenv/config';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import {
-  CATEGORY_COLORS,
-  MAX_CATEGORIES_PER_USER,
-} from '../src/modules/categories/categories.constants';
+import { PALETTE } from '../src/common/constants/palette.constants';
+import { MAX_CATEGORIES_PER_USER } from '../src/modules/categories/categories.constants';
 import { createTestApp } from './helpers/app.helper';
 import { createTestUser, getAccessToken } from './helpers/auth.helper';
 import {
@@ -20,6 +18,7 @@ interface CategoryResponse {
   id: string;
   name: string;
   color: string;
+  colorHex: string | null;
   exerciseNames: string[];
 }
 
@@ -91,6 +90,7 @@ describe('종목 카테고리 (e2e)', () => {
 
     expect(body.name).toBe('유산소'); // trim
     expect(body.color).toBe('blue');
+    expect(body.colorHex).toBe('#0079FF'); // 새 팔레트의 hex
     expect(sorted(body.exerciseNames)).toEqual(sorted(['러닝', '사이클'])); // 중복 제거
     cardioId = body.id;
 
@@ -113,10 +113,14 @@ describe('종목 카테고리 (e2e)', () => {
     const post = (body: object) =>
       request(server()).post('/categories').set(authOf(users.a)).send(body);
 
-    await post({ name: '유산소', color: 'green' }).expect(409);
-    await post({ name: ' 유산소 ', color: 'green' }).expect(409); // trim 후 같은 이름
+    await post({ name: '유산소', color: 'lime' }).expect(409);
+    await post({ name: ' 유산소 ', color: 'lime' }).expect(409); // trim 후 같은 이름
 
     await post({ name: '새 카테고리', color: 'neon' }).expect(400);
+    // 이전 팔레트의 키는 더 이상 유효하지 않다
+    for (const oldKey of ['pink', 'green', 'teal', 'indigo', 'gray']) {
+      await post({ name: '새 카테고리', color: oldKey }).expect(400);
+    }
     await post({ name: '새 카테고리' }).expect(400); // color 누락
     await post({ name: '   ', color: 'blue' }).expect(400);
     await post({ name: 'a'.repeat(21), color: 'blue' }).expect(400);
@@ -130,8 +134,21 @@ describe('종목 카테고리 (e2e)', () => {
     await request(server())
       .post('/categories')
       .set(authOf(users.b))
-      .send({ name: '유산소', color: 'green' })
+      .send({ name: '유산소', color: 'lime' })
       .expect(201);
+  });
+
+  it('2-1. 새 팔레트의 12개 키로 모두 카테고리를 만들 수 있고 colorHex가 팔레트와 일치한다', async () => {
+    for (const { key, hex } of PALETTE) {
+      const res = await request(server())
+        .post('/categories')
+        .set(authOf(users.b))
+        .send({ name: `색상 ${key}`, color: key })
+        .expect(201);
+      const body = res.body as CategoryResponse;
+      expect(body.color).toBe(key);
+      expect(body.colorHex).toBe(hex);
+    }
   });
 
   it('3. 사용자당 최대 개수를 넘으면 409이다 (21번째)', async () => {
@@ -139,14 +156,14 @@ describe('종목 카테고리 (e2e)', () => {
       await request(server())
         .post('/categories')
         .set(authOf(users.c))
-        .send({ name: `카테고리${i}`, color: 'gray' })
+        .send({ name: `카테고리${i}`, color: 'black' })
         .expect(201);
     }
 
     await request(server())
       .post('/categories')
       .set(authOf(users.c))
-      .send({ name: '카테고리 초과', color: 'gray' })
+      .send({ name: '카테고리 초과', color: 'black' })
       .expect(409);
 
     expect(await listOf(users.c)).toHaveLength(MAX_CATEGORIES_PER_USER);
@@ -162,6 +179,7 @@ describe('종목 카테고리 (e2e)', () => {
       id: strengthId,
       name: '근력 운동',
       color: 'red',
+      colorHex: '#D21417',
       exerciseNames: ['스쿼트'],
     });
 
@@ -174,6 +192,7 @@ describe('종목 카테고리 (e2e)', () => {
       id: strengthId,
       name: '근력 운동',
       color: 'purple',
+      colorHex: '#7B2CBF',
       exerciseNames: ['스쿼트'],
     });
 
@@ -314,7 +333,7 @@ describe('종목 카테고리 (e2e)', () => {
     const res = await request(server())
       .post('/categories')
       .set(authOf(users.a))
-      .send({ name: '새 유산소', color: 'teal', exerciseNames: ['사이클'] })
+      .send({ name: '새 유산소', color: 'sky', exerciseNames: ['사이클'] })
       .expect(201);
     expect((res.body as CategoryResponse).exerciseNames).toEqual(['사이클']);
 
@@ -330,8 +349,25 @@ describe('종목 카테고리 (e2e)', () => {
       .get('/categories/colors')
       .set(authOf(users.a))
       .expect(200);
-    expect(res.body).toEqual({ colors: [...CATEGORY_COLORS] });
-    expect((res.body as { colors: string[] }).colors).toHaveLength(12);
+    const colors = (res.body as { colors: { key: string; hex: string }[] })
+      .colors;
+    expect(colors).toHaveLength(12);
+    expect(colors).toEqual(PALETTE.map(({ key, hex }) => ({ key, hex })));
+    expect(colors.map((color) => color.key)).toEqual([
+      'rose',
+      'coral',
+      'red',
+      'crimson',
+      'orange',
+      'amber',
+      'yellow',
+      'lime',
+      'sky',
+      'blue',
+      'purple',
+      'black',
+    ]);
+    expect(colors.find((color) => color.key === 'blue')!.hex).toBe('#0079FF');
 
     await request(server()).get('/categories/colors').expect(401);
     await request(server()).get('/categories').expect(401);

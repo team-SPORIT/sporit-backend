@@ -29,6 +29,7 @@ interface CalendarExercise {
   categoryId: string | null;
   categoryName: string | null;
   color: string | null;
+  colorHex: string | null;
 }
 
 interface CalendarResponse {
@@ -256,6 +257,7 @@ describe('월별 캘린더 (e2e)', () => {
         categoryId: cardioId,
         categoryName: '유산소',
         color: 'blue',
+        colorHex: '#0079FF',
       },
     ]);
     expect(byDate.get(formatKstDate(dayOf(prev, 5)))!.exercises).toEqual([
@@ -264,12 +266,14 @@ describe('월별 캘린더 (e2e)', () => {
         categoryId: null,
         categoryName: null,
         color: null,
+        colorHex: null,
       },
       {
         exerciseType: '러닝',
         categoryId: cardioId,
         categoryName: '유산소',
         color: 'blue',
+        colorHex: '#0079FF',
       },
     ]);
     expect(byDate.get(formatKstDate(prev.to))!.exercises).toEqual([
@@ -278,6 +282,7 @@ describe('월별 캘린더 (e2e)', () => {
         categoryId: strengthId,
         categoryName: '근력',
         color: 'red',
+        colorHex: '#D21417',
       },
     ]);
   });
