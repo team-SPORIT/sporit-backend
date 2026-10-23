@@ -14,7 +14,10 @@ export class WeeklyDayStatsDto {
 
 // 종목별 집계
 export class WeeklyExerciseStatsDto {
-  @ApiProperty({ description: '운동 종류' })
+  @ApiProperty({ description: '종목 ID', type: String })
+  exerciseId: string;
+
+  @ApiProperty({ description: '종목 이름' })
   exerciseType: string;
 
   @ApiProperty({ description: '해당 종목의 운동 시간 합계(초)' })

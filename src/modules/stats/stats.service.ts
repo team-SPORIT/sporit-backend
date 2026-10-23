@@ -20,6 +20,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // record_date + 종목 단위로 묶은 집계 행
 interface DailyExerciseRow {
   date: string;
+  exerciseId: string;
   exerciseType: string;
   totalSeconds: number;
   count: number;
@@ -101,22 +102,33 @@ export class StatsService {
     return comparableDays.reduce((sum, day) => sum + day.totalSeconds, 0);
   }
 
-  // [start, end] 범위의 내 기록을 한 번의 쿼리로 날짜/종목별 합산 (duration_sec가 null이면 0으로 취급, count에는 포함)
+  // [start, end] 범위의 내 기록을 한 번의 쿼리로 날짜/종목(exercise_id)별 합산 (duration_sec가 null이면 0으로 취급, count에는 포함)
+  // 종목 이름은 집계에 나온 exercise_id들을 exercises에서 한 번에 조회해 채운다
   private async aggregateDailyByExercise(
     userId: string,
     start: Date,
     end: Date,
   ): Promise<DailyExerciseRow[]> {
     const groups = await this.prisma.records.groupBy({
-      by: ['record_date', 'exercise_type'],
+      by: ['record_date', 'exercise_id'],
       where: { user_id: userId, record_date: { gte: start, lte: end } },
       _sum: { duration_sec: true },
       _count: { _all: true },
     });
 
+    const exerciseIds = [...new Set(groups.map((group) => group.exercise_id))];
+    const exercises = await this.prisma.exercises.findMany({
+      where: { id: { in: exerciseIds } },
+      select: { id: true, name: true },
+    });
+    const nameById = new Map(
+      exercises.map((exercise) => [exercise.id, exercise.name]),
+    );
+
     return groups.map((group) => ({
       date: formatKstDate(group.record_date),
-      exerciseType: group.exercise_type,
+      exerciseId: group.exercise_id.toString(),
+      exerciseType: nameById.get(group.exercise_id) ?? '',
       totalSeconds: Number(group._sum.duration_sec ?? 0),
       count: Number(group._count._all),
     }));
@@ -147,19 +159,20 @@ export class StatsService {
     return days;
   }
 
-  // 종목별 합산, 운동 시간 내림차순
+  // 종목(exercise_id)별 합산, 운동 시간 내림차순 (이름이 같아도 id가 다르면 따로 집계)
   private buildByExercise(rows: DailyExerciseRow[]): WeeklyExerciseStatsDto[] {
     const byExercise = new Map<string, WeeklyExerciseStatsDto>();
 
     for (const row of rows) {
-      const entry = byExercise.get(row.exerciseType) ?? {
+      const entry = byExercise.get(row.exerciseId) ?? {
+        exerciseId: row.exerciseId,
         exerciseType: row.exerciseType,
         totalSeconds: 0,
         count: 0,
       };
       entry.totalSeconds += row.totalSeconds;
       entry.count += row.count;
-      byExercise.set(row.exerciseType, entry);
+      byExercise.set(row.exerciseId, entry);
     }
 
     return [...byExercise.values()].sort(

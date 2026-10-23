@@ -13,8 +13,8 @@ export class ExercisesService {
 
   // 내 종목 목록 조회 (등록 순)
   async findMe(userId: string) {
-    return this.prisma.user_exercises.findMany({
-      where: { user_id: userId },
+    return this.prisma.exercises.findMany({
+      where: { owner_id: userId },
       orderBy: { created_at: 'asc' },
     });
   }
@@ -22,9 +22,9 @@ export class ExercisesService {
   // 종목 추가
   async create(userId: string, dto: CreateExerciseDto) {
     try {
-      return await this.prisma.user_exercises.create({
+      return await this.prisma.exercises.create({
         data: {
-          user_id: userId,
+          owner_id: userId,
           name: dto.name,
         },
       });
@@ -42,14 +42,14 @@ export class ExercisesService {
 
   // 종목 삭제 (본인 소유만)
   async remove(userId: string, id: bigint) {
-    const exercise = await this.prisma.user_exercises.findUnique({
+    const exercise = await this.prisma.exercises.findUnique({
       where: { id },
     });
 
-    if (!exercise || exercise.user_id !== userId) {
+    if (!exercise || exercise.owner_id !== userId) {
       throw new NotFoundException('종목을 찾을 수 없습니다.');
     }
 
-    await this.prisma.user_exercises.delete({ where: { id } });
+    await this.prisma.exercises.delete({ where: { id } });
   }
 }

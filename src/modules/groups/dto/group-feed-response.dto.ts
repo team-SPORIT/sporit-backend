@@ -21,7 +21,10 @@ export class FeedShareDto {
   @ApiProperty({ description: '기록 ID', type: String })
   recordId: bigint;
 
-  @ApiProperty({ description: '운동 종류' })
+  @ApiProperty({ description: '종목 ID', type: String })
+  exerciseId: bigint;
+
+  @ApiProperty({ description: '종목 이름' })
   exerciseType: string;
 
   @ApiProperty({ description: '운동 시간(초)', nullable: true })
