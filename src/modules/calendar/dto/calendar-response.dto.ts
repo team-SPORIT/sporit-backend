@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { CATEGORY_COLORS } from '../../categories/categories.constants';
+import { PALETTE_KEYS } from '../../../common/constants/palette.constants';
 
 // 캘린더 하루에 기록된 종목 (같은 이름은 하루에 한 번만. categoryId는 BigInt라 전역 toJSON에 의해 문자열로 직렬화됨)
 export class CalendarExerciseDto {
@@ -25,7 +25,7 @@ export class CalendarExerciseDto {
   @ApiProperty({
     description: '카테고리 색상 팔레트 키 (미분류면 null)',
     type: String,
-    enum: CATEGORY_COLORS,
+    enum: PALETTE_KEYS,
     nullable: true,
     example: 'blue',
   })

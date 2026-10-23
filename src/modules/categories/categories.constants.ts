@@ -1,20 +1,4 @@
-// 카테고리 색상 팔레트 키. DB에는 이 키 문자열을 저장하고 서비스(DTO)에서 검증한다
-export const CATEGORY_COLORS = [
-  'red',
-  'orange',
-  'yellow',
-  'lime',
-  'green',
-  'teal',
-  'sky',
-  'blue',
-  'indigo',
-  'purple',
-  'pink',
-  'gray',
-] as const;
-
-export type CategoryColor = (typeof CATEGORY_COLORS)[number];
+// 색상 팔레트는 공통 상수(src/common/constants/palette.constants.ts)를 사용한다
 
 // 사용자당 최대 카테고리 수
 export const MAX_CATEGORIES_PER_USER = 20;

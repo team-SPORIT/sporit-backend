@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { CATEGORY_COLORS } from '../categories.constants';
+import { PALETTE_KEYS } from '../../../common/constants/palette.constants';
 
 // 카테고리 응답 (키는 camelCase. id는 BigInt라 전역 toJSON에 의해 문자열로 직렬화됨)
 export class CategoryResponseDto {
@@ -11,7 +11,7 @@ export class CategoryResponseDto {
 
   @ApiProperty({
     description: '색상 팔레트 키',
-    enum: CATEGORY_COLORS,
+    enum: PALETTE_KEYS,
     example: 'blue',
   })
   color: string;
@@ -31,7 +31,7 @@ export class CategoryColorsResponseDto {
     description: '사용할 수 있는 색상 팔레트 키 목록',
     type: String,
     isArray: true,
-    example: CATEGORY_COLORS,
+    example: PALETTE_KEYS,
   })
   colors: string[];
 }
