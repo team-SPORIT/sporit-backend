@@ -596,16 +596,17 @@ model record_shares {
 }
 
 model records {
-  id            BigInt          @id @default(autoincrement())
-  user_id       String          @db.Uuid
-  exercise_type String          @db.VarChar(30)
-  duration_min  Int?
-  comment       String?         @db.VarChar(200)
-  photo_url     String          @db.VarChar(500)
-  record_date   DateTime        @db.Date
-  created_at    DateTime        @default(now()) @db.Timestamptz(6)
-  record_shares record_shares[]
-  profiles      profiles        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id              BigInt          @id @default(autoincrement())
+  user_id         String          @db.Uuid
+  exercise_type   String          @db.VarChar(30)
+  duration_min    Int?
+  comment         String?         @db.VarChar(200)
+  start_image_url String          @db.VarChar(500)
+  record_date     DateTime        @db.Date
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  end_image_url   String          @db.VarChar
+  record_shares   record_shares[]
+  profiles        profiles        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([user_id, record_date], map: "idx_records_user_date")
   @@schema("public")

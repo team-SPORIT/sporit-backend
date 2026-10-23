@@ -38,7 +38,8 @@ export class RecordsService {
           exercise_type: dto.exerciseType,
           duration_min: dto.durationMin,
           comment: dto.comment,
-          photo_url: photoUrl,
+          start_image_url: photoUrl,
+          end_image_url: photoUrl, // 임시: 2장 업로드 지원 전까지 동일 URL 사용
           record_date: recordDate,
         },
       });
@@ -86,7 +87,7 @@ export class RecordsService {
     const record = await this.findOne(userId, id);
 
     await this.prisma.records.delete({ where: { id } });
-    await this.deleteRecordImage(record.photo_url);
+    await this.deleteRecordImage(record.start_image_url);
   }
 
   // 기록 이미지를 record-images 버킷에 업로드하고 public URL 반환

@@ -163,7 +163,7 @@ export class GroupsService {
         exerciseType: share.records.exercise_type,
         durationMin: share.records.duration_min,
         comment: share.records.comment,
-        photoUrl: share.records.photo_url,
+        startImageUrl: share.records.start_image_url,
         recordDate: share.records.record_date,
         sharedAt: share.shared_at,
         author: {

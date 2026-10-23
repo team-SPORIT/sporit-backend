@@ -30,8 +30,8 @@ export class FeedShareDto {
   @ApiProperty({ description: '코멘트', nullable: true })
   comment: string | null;
 
-  @ApiProperty({ description: '기록 사진 URL' })
-  photoUrl: string;
+  @ApiProperty({ description: '시작 사진 URL' })
+  startImageUrl: string;
 
   @ApiProperty({ description: '운동 날짜' })
   recordDate: Date;
