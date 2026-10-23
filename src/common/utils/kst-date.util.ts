@@ -56,3 +56,9 @@ export function getKstWeekStart(date: Date): Date {
 export function formatKstDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
+
+// KST 오늘을 포함한 최근 days일의 [from, to] 범위 (예: days=7이면 from은 6일 전, to는 오늘). 둘 다 getKstToday() 형태
+export function getKstRecentRange(days: number): { from: Date; to: Date } {
+  const to = getKstToday();
+  return { from: subtractDays(to, days - 1), to };
+}

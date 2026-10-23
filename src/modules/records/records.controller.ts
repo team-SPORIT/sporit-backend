@@ -31,6 +31,7 @@ import {
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateRecordDto } from './dto/create-record.dto';
+import { RecentRecordsResponseDto } from './dto/recent-records-response.dto';
 import { RecordResponseDto } from './dto/record-response.dto';
 import {
   type RecordImageFiles,
@@ -109,6 +110,28 @@ export class RecordsController {
     @Query('month', ParseIntPipe) month: number,
   ) {
     return this.recordsService.findMyRecordsByMonth(user.id, year, month);
+  }
+
+  // 내 최근 7일 기록 조회 (종목 이름별). 라우트 충돌을 피하려고 :id 라우트보다 먼저 선언한다
+  @Get('me/recent')
+  @ApiOperation({
+    summary: '내 최근 7일 기록 조회 (종목별)',
+    description:
+      'KST 기준 오늘을 포함한 최근 7일(record_date)의 내 기록을 종목 이름별로 묶어서 내려준다. 같은 이름의 종목은 종목 ID가 달라도 한 종목으로 합산한다. 7일이 지난 기록도 삭제되지 않고 이 조회에서만 제외된다. 시작/종료 사진(startImageUrl, endImageUrl)이 모든 기록에 포함된다.',
+  })
+  @ApiQuery({
+    name: 'exerciseType',
+    required: false,
+    description:
+      '종목 이름 (trim 후 정확히 일치하는 종목의 기록만). 생략하면 전체 종목',
+    example: '러닝',
+  })
+  @ApiOkResponse({ type: RecentRecordsResponseDto })
+  findMyRecentRecords(
+    @CurrentUser() user: { id: string; email: string },
+    @Query('exerciseType') exerciseType?: string,
+  ): Promise<RecentRecordsResponseDto> {
+    return this.recordsService.findMyRecentRecords(user.id, exerciseType);
   }
 
   // 기록 상세 조회 (본인 기록만)

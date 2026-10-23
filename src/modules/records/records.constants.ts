@@ -9,3 +9,6 @@ export const MIME_TO_EXT: Record<string, string> = {
 };
 
 export const RECORD_IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+
+// "최근 기록" 조회 기간(일). KST 기준 오늘을 포함해 최근 7일이며, 이보다 오래된 기록도 DB에는 그대로 둔다
+export const RECENT_DAYS = 7;
