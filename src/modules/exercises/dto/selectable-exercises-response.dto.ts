@@ -21,7 +21,14 @@ export class SelectableGroupDto {
 export class SelectableExercisesResponseDto {
   @ApiProperty({
     description:
-      '내 개인 종목 (등록순). 기본 종목 전체는 포함하지 않으며 GET /exercises로 조회한다',
+      '기본 종목 전체 (id 오름차순). 그룹 제한과 무관하게 항상 내려온다',
+    type: ExerciseSummaryDto,
+    isArray: true,
+  })
+  defaults: ExerciseSummaryDto[];
+
+  @ApiProperty({
+    description: '내 개인 종목 (등록순)',
     type: ExerciseSummaryDto,
     isArray: true,
   })

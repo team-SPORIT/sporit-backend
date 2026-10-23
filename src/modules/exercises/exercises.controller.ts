@@ -54,7 +54,7 @@ export class ExercisesController {
   @ApiOperation({
     summary: '기록 작성 화면용 선택 가능 종목 조회',
     description:
-      'mine: 내 개인 종목. groups: 내가 속한 그룹 중 허용 종목이 설정된(제한 있는) 그룹과 그 허용 종목. 기본 종목 전체는 GET /exercises로 조회한다.',
+      'defaults: 기본 종목 전체. mine: 내 개인 종목. groups: 내가 속한 그룹 중 허용 종목이 설정된(제한 있는) 그룹과 그 허용 종목(제한 없는 그룹은 제외).',
   })
   @ApiOkResponse({ type: SelectableExercisesResponseDto })
   findSelectable(

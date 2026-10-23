@@ -30,12 +30,16 @@ export class ExercisesService {
     }));
   }
 
-  // 기록 작성 화면용 선택 목록: 내 개인 종목(mine) + 허용 종목이 설정된 내 그룹과 그 허용 종목(groups)
-  // 기본 종목 전체와 제한 없는 그룹은 포함하지 않는다
+  // 기록 작성 화면용 선택 목록: 기본 종목 전체(defaults) + 내 개인 종목(mine) + 허용 종목이 설정된 내 그룹과 그 허용 종목(groups)
+  // 제한 없는 그룹은 포함하지 않는다
   async findSelectable(
     userId: string,
   ): Promise<SelectableExercisesResponseDto> {
-    const [myExercises, groups] = await Promise.all([
+    const [defaultExercises, myExercises, groups] = await Promise.all([
+      this.prisma.exercises.findMany({
+        where: { owner_id: null },
+        orderBy: { id: 'asc' },
+      }),
       this.prisma.exercises.findMany({
         where: { owner_id: userId },
         orderBy: { id: 'asc' },
@@ -44,6 +48,11 @@ export class ExercisesService {
     ]);
 
     return {
+      defaults: defaultExercises.map(({ id, name }) => ({
+        id,
+        name,
+        isDefault: true,
+      })),
       mine: myExercises.map(({ id, name }) => ({ id, name, isDefault: false })),
       groups,
     };

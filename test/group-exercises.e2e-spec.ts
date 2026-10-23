@@ -30,6 +30,7 @@ interface GroupExercisesResponse {
 }
 
 interface SelectableResponse {
+  defaults: ExerciseSummary[];
   mine: ExerciseSummary[];
   groups: {
     groupId: string;
@@ -267,8 +268,20 @@ describe('그룹 허용 종목 (e2e)', () => {
 
     expect(bodyA.mine.map((e) => e.id)).toEqual([customId]);
     expect(bodyA.mine.every((e) => e.isDefault === false)).toBe(true);
-    // 기본 종목 전체 풀은 mine에 들어가지 않는다
+    // 기본 종목은 mine이 아니라 defaults에 들어간다
     expect(bodyA.mine.map((e) => e.id)).not.toContain(ex.running);
+    const defaultIds = bodyA.defaults.map((e) => BigInt(e.id));
+    expect(bodyA.defaults.every((e) => e.isDefault === true)).toBe(true);
+    expect(bodyA.defaults.map((e) => e.id)).toEqual(
+      expect.arrayContaining([ex.running, ex.yoga, ex.swimming]),
+    );
+    // id 오름차순
+    expect(defaultIds).toEqual([...defaultIds].sort((a, b) => Number(a - b)));
+    // DB의 기본 종목 수와 일치 (전체가 내려옴)
+    const defaultCount = await prisma.exercises.count({
+      where: { owner_id: null },
+    });
+    expect(bodyA.defaults).toHaveLength(defaultCount);
 
     const groupsById = new Map(bodyA.groups.map((g) => [g.groupId, g]));
     expect([...groupsById.keys()].sort()).toEqual([g1, g2].sort());
@@ -288,6 +301,7 @@ describe('그룹 허용 종목 (e2e)', () => {
       .expect(200);
     const bodyB = resB.body as SelectableResponse;
     expect(bodyB.mine).toEqual([]);
+    expect(bodyB.defaults).toEqual(bodyA.defaults);
     expect(bodyB.groups.map((g) => g.groupId).sort()).toEqual([g1, g2].sort());
   });
 
@@ -375,5 +389,47 @@ describe('그룹 허용 종목 (e2e)', () => {
     ]);
     expect(body.records[0].exerciseType).toBe('러닝');
     expect(body.records[0].exerciseId).toBe(ex.running);
+  });
+});
+
+// 제한 그룹이 하나도 없는 유저(C)에게도 기본 종목 전체는 내려온다
+describe('선택 가능 종목 - 제한 그룹이 없을 때 (e2e)', () => {
+  let app: INestApplication<App>;
+  const user = {
+    email: `sporit-e2e-ge-d-${runId}@example.com`,
+    id: '',
+    token: '',
+  };
+
+  beforeAll(async () => {
+    app = await createTestApp();
+    user.id = (await createTestUser(user.email, 'Test1234!')).id;
+    user.token = await getAccessToken(user.email, 'Test1234!');
+    await request(app.getHttpServer())
+      .post('/auth/sync')
+      .set('Authorization', `Bearer ${user.token}`);
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await cleanupTestData({ userIds: [user.id] });
+    await disconnectPrisma();
+  });
+
+  it('그룹이 없어도 defaults에 기본 종목 전체가 내려오고 mine, groups는 비어 있다', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/exercises/selectable')
+      .set('Authorization', `Bearer ${user.token}`)
+      .expect(200);
+    const body = res.body as SelectableResponse;
+
+    const defaultCount = await prisma.exercises.count({
+      where: { owner_id: null },
+    });
+    expect(defaultCount).toBeGreaterThan(0);
+    expect(body.defaults).toHaveLength(defaultCount);
+    expect(body.defaults.every((e) => e.isDefault)).toBe(true);
+    expect(body.mine).toEqual([]);
+    expect(body.groups).toEqual([]);
   });
 });
