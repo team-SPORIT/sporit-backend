@@ -34,7 +34,7 @@ export class SharesController {
   @ApiOperation({
     summary: '기록을 그룹에 공유',
     description:
-      '한 번에 한 그룹에 공유한다. 그룹에 허용 종목이 설정되어 있으면 기록의 종목이 허용 목록에 있어야 한다.',
+      '한 번에 한 그룹에 공유한다. 그룹이 허용 종목을 제한 중(allowAll=false)이면 기록 종목의 이름이 그 그룹 허용 종목 이름 중 하나와 같아야 한다.',
   })
   @ApiNotFoundResponse({ description: '기록을 찾을 수 없음' })
   @ApiForbiddenResponse({

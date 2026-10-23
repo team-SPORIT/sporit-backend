@@ -14,7 +14,7 @@ import {
 // 운동 기록 생성용 DTO (multipart/form-data의 텍스트 필드)
 export class CreateRecordDto {
   @ApiProperty({
-    description: '종목 ID (기본 종목 또는 내 종목)',
+    description: '종목 ID (내 개인 종목 또는 내가 속한 그룹의 허용 종목)',
     type: String,
   })
   @IsNotEmpty()

@@ -9,6 +9,7 @@ import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../common/supabase/supabase.service';
 import { getKstToday } from '../../common/utils/kst-date.util';
+import { ExercisesService } from '../exercises/exercises.service';
 import { CreateRecordDto } from './dto/create-record.dto';
 import type { RecordImageFiles } from './pipes/record-images.pipe';
 import { MIME_TO_EXT, RECORD_IMAGES_BUCKET } from './records.constants';
@@ -23,6 +24,7 @@ export class RecordsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabase: SupabaseService,
+    private readonly exercisesService: ExercisesService,
   ) {}
 
   // 운동 기록 작성
@@ -31,7 +33,7 @@ export class RecordsService {
   async create(userId: string, dto: CreateRecordDto, files: RecordImageFiles) {
     // 이미지 업로드 전에 종목부터 검증해 불필요한 업로드를 막는다
     const exerciseId = BigInt(dto.exerciseId);
-    await this.assertUsableExercise(userId, exerciseId);
+    await this.exercisesService.assertUsableExercise(userId, exerciseId);
 
     const { startPath, endPath, startImageUrl, endImageUrl } =
       await this.uploadRecordImages(userId, files);
@@ -78,20 +80,6 @@ export class RecordsService {
 
       return this.toRecordResponse(record);
     });
-  }
-
-  // 종목 사용 가능 여부 검증: 없으면 404, 남의 개인 종목이면 403 (기본 종목 또는 내 종목만 허용)
-  private async assertUsableExercise(userId: string, exerciseId: bigint) {
-    const exercise = await this.prisma.exercises.findUnique({
-      where: { id: exerciseId },
-      select: { owner_id: true },
-    });
-    if (!exercise) {
-      throw new NotFoundException('종목을 찾을 수 없습니다.');
-    }
-    if (exercise.owner_id !== null && exercise.owner_id !== userId) {
-      throw new ForbiddenException('사용할 수 없는 종목입니다.');
-    }
   }
 
   // 응답에 종목 이름(exercise_type)을 평탄화해서 내려준다 (exercise_id는 기록 행에 그대로 포함)
@@ -214,6 +202,7 @@ export class RecordsService {
   }
 
   // 종목별 통계 upsert: 횟수 +1, 시간(초) 누적 (값이 없으면 0)
+  // user_exercise_stats는 exercise_id 기준 내부 집계용이다. 이후 통계/캘린더/카테고리는 종목 "이름" 기준으로 쓸 예정
   private async upsertExerciseStats(
     tx: Prisma.TransactionClient,
     userId: string,

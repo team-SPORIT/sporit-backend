@@ -104,11 +104,11 @@ export class GroupsService {
     });
   }
 
-  // 내가 속한 그룹 중 허용 종목이 설정된(제한 있는) 그룹과 그 허용 종목 (내 그룹 목록과 같은 정렬)
+  // 내가 속한 그룹 중 허용 종목이 제한된(allow_all_exercises=false) 그룹과 그 허용 종목 (내 그룹 목록과 같은 정렬)
   // 그룹 목록, 허용 종목을 한 번의 쿼리로 가져온다 (N+1 방지)
   async findMyRestrictedGroupsWithExercises(userId: string) {
     const memberships = await this.prisma.group_members.findMany({
-      where: { user_id: userId, groups: { group_exercises: { some: {} } } },
+      where: { user_id: userId, groups: { allow_all_exercises: false } },
       include: {
         groups: {
           select: {
@@ -116,7 +116,7 @@ export class GroupsService {
             name: true,
             group_exercises: {
               include: {
-                exercises: { select: { id: true, name: true, owner_id: true } },
+                exercises: { select: { id: true, name: true } },
               },
               orderBy: { exercise_id: 'asc' },
             },
@@ -129,11 +129,7 @@ export class GroupsService {
     return memberships.map(({ groups }) => ({
       groupId: groups.id,
       groupName: groups.name,
-      exercises: groups.group_exercises.map(({ exercises }) => ({
-        id: exercises.id,
-        name: exercises.name,
-        isDefault: exercises.owner_id === null,
-      })),
+      exercises: groups.group_exercises.map(({ exercises }) => exercises),
     }));
   }
 
@@ -158,7 +154,7 @@ export class GroupsService {
     });
   }
 
-  // 그룹 허용 종목 조회 (멤버만 가능). 허용 종목 행이 없으면 제한 없음(restricted=false)
+  // 그룹 허용 종목 조회 (멤버만 가능). allow_all_exercises가 true면 제한 없음
   async getExercises(
     userId: string,
     groupId: bigint,
@@ -173,8 +169,11 @@ export class GroupsService {
     return this.findGroupExercises(this.prisma, groupId);
   }
 
-  // 그룹 허용 종목 전체 교체 (그룹장만). 기존 행을 지우고 새로 만들며, 빈 배열이면 제한 없음.
-  // 허용 종목은 기본 종목(owner_id null)만 가능: 없는 ID이거나 개인 종목이 섞여 있으면 400
+  // 그룹 허용 종목 설정 (그룹장만)
+  // - allowAll=true: allow_all_exercises만 켠다 (group_exercises는 그대로 둠)
+  // - allowAll=false: names(1개 이상 필수, 정리 후 중복 제거)로 이 그룹의 그룹 전용 종목을 find-or-create 하고,
+  //   allow_all_exercises를 끈 뒤 group_exercises를 전체 교체한다.
+  //   허용 목록에서 빠진 그룹 전용 종목은 삭제하지 않는다 (기록이 참조 중일 수 있음)
   async setExercises(
     userId: string,
     groupId: bigint,
@@ -191,19 +190,33 @@ export class GroupsService {
       throw new ForbiddenException('그룹장만 허용 종목을 설정할 수 있습니다.');
     }
 
-    const exerciseIds = [...new Set(dto.exerciseIds.map((id) => BigInt(id)))];
-    if (exerciseIds.length > 0) {
-      const defaultCount = await this.prisma.exercises.count({
-        where: { id: { in: exerciseIds }, owner_id: null },
+    if (dto.allowAll) {
+      await this.prisma.groups.update({
+        where: { id: groupId },
+        data: { allow_all_exercises: true },
       });
-      if (defaultCount !== exerciseIds.length) {
-        throw new BadRequestException(
-          '존재하지 않거나 기본 종목이 아닌 종목이 포함되어 있습니다.',
-        );
-      }
+      return this.findGroupExercises(this.prisma, groupId);
+    }
+
+    const names = [...new Set(dto.names ?? [])];
+    if (names.length === 0) {
+      throw new BadRequestException(
+        '허용할 종목 이름(names)을 1개 이상 지정해야 합니다.',
+      );
     }
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const exerciseIds: bigint[] = [];
+      for (const name of names) {
+        exerciseIds.push(
+          await this.findOrCreateGroupExercise(tx, groupId, name),
+        );
+      }
+
+      await tx.groups.update({
+        where: { id: groupId },
+        data: { allow_all_exercises: false },
+      });
       await tx.group_exercises.deleteMany({ where: { group_id: groupId } });
       await tx.group_exercises.createMany({
         data: exerciseIds.map((exerciseId) => ({
@@ -216,26 +229,48 @@ export class GroupsService {
     });
   }
 
-  // 그룹 허용 종목 조회 (id순). 행이 없으면 restricted=false
+  // 이 그룹의 그룹 전용 종목을 이름으로 찾고, 없으면 새로 만든다
+  private async findOrCreateGroupExercise(
+    tx: Prisma.TransactionClient,
+    groupId: bigint,
+    name: string,
+  ): Promise<bigint> {
+    const existing = await tx.exercises.findFirst({
+      where: { group_id: groupId, name },
+      select: { id: true },
+    });
+    if (existing) {
+      return existing.id;
+    }
+
+    const created = await tx.exercises.create({
+      data: { group_id: groupId, name },
+      select: { id: true },
+    });
+    return created.id;
+  }
+
+  // 그룹 허용 종목 조회 (id순). allowAll과 관계없이 저장된 허용 목록을 내려준다
   private async findGroupExercises(
     client: Prisma.TransactionClient | PrismaService,
     groupId: bigint,
   ): Promise<GroupExercisesResponseDto> {
-    const rows = await client.group_exercises.findMany({
-      where: { group_id: groupId },
-      include: {
-        exercises: { select: { id: true, name: true, owner_id: true } },
+    const group = await client.groups.findUniqueOrThrow({
+      where: { id: groupId },
+      select: {
+        allow_all_exercises: true,
+        group_exercises: {
+          include: {
+            exercises: { select: { id: true, name: true } },
+          },
+          orderBy: { exercise_id: 'asc' },
+        },
       },
-      orderBy: { exercise_id: 'asc' },
     });
 
     return {
-      restricted: rows.length > 0,
-      exercises: rows.map(({ exercises }) => ({
-        id: exercises.id,
-        name: exercises.name,
-        isDefault: exercises.owner_id === null,
-      })),
+      allowAll: group.allow_all_exercises,
+      exercises: group.group_exercises.map(({ exercises }) => exercises),
     };
   }
 

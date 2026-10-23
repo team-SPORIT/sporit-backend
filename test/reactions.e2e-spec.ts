@@ -51,17 +51,22 @@ describe('좋아요/댓글 (e2e)', () => {
   const password = 'Test1234!';
 
   let groupId: string;
-  let runningId: string;
   let shareId: string;
   let commentId: string;
 
   const server = () => app.getHttpServer();
 
   async function createRecordAndShare(token: string): Promise<string> {
+    // 기본 종목이 없으므로 유저마다 개인 종목을 만들어 기록에 사용한다
+    const exerciseRes = await request(server())
+      .post('/exercises')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: '러닝' })
+      .expect(201);
     const recordRes = await request(server())
       .post('/records')
       .set('Authorization', `Bearer ${token}`)
-      .field('exerciseId', runningId)
+      .field('exerciseId', (exerciseRes.body as IdResponse).id)
       .attach('startFile', TEST_IMAGE_PATH)
       .attach('endFile', TEST_IMAGE_PATH)
       .expect(201);
@@ -87,12 +92,6 @@ describe('좋아요/댓글 (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-
-    // 기본 종목 '러닝'의 id
-    const running = await prisma.exercises.findFirstOrThrow({
-      where: { owner_id: null, name: '러닝' },
-    });
-    runningId = running.id.toString();
 
     for (const user of Object.values(users)) {
       user.id = (await createTestUser(user.email, password)).id;

@@ -85,15 +85,6 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     userAId = createdA.id;
     userBId = createdB.id;
 
-    // 기본 종목(owner_id null)의 id를 조회해서 사용한다
-    const [running, yoga] = await Promise.all(
-      ['러닝', '요가'].map((name) =>
-        prisma.exercises.findFirstOrThrow({ where: { owner_id: null, name } }),
-      ),
-    );
-    runningId = running.id.toString();
-    yogaId = yoga.id.toString();
-
     tokenA = await getAccessToken(userA.email, userA.password);
     tokenB = await getAccessToken(userB.email, userB.password);
   });
@@ -119,6 +110,20 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .set('Authorization', `Bearer ${tokenB}`)
       .expect(201);
     expect((resB.body as ProfileResponse).id).toBe(userBId);
+
+    // 기본 종목이 없으므로 각자 개인 종목을 만들어 기록에 사용한다
+    const runningRes = await request(app.getHttpServer())
+      .post('/exercises')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: '러닝' })
+      .expect(201);
+    runningId = (runningRes.body as { id: string }).id;
+    const yogaRes = await request(app.getHttpServer())
+      .post('/exercises')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ name: '요가' })
+      .expect(201);
+    yogaId = (yogaRes.body as { id: string }).id;
   });
 
   it('2. A가 POST /groups 하면 그룹이 생성되고 초대코드가 발급된다', async () => {

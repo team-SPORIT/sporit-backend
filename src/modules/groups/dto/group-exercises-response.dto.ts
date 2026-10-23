@@ -7,20 +7,18 @@ export class ExerciseSummaryDto {
 
   @ApiProperty({ description: '종목 이름' })
   name: string;
-
-  @ApiProperty({ description: '기본 종목 여부 (owner_id가 null이면 true)' })
-  isDefault: boolean;
 }
 
 // 그룹 허용 종목 응답
 export class GroupExercisesResponseDto {
   @ApiProperty({
-    description: '허용 종목이 설정되어 있는지 (false면 제한 없음)',
+    description:
+      'true면 모든 종목 허용(exercises는 이전에 설정해 둔 허용 목록이며 적용되지 않음), false면 exercises의 이름과 같은 종목만 공유 가능',
   })
-  restricted: boolean;
+  allowAll: boolean;
 
   @ApiProperty({
-    description: '허용된 종목 목록 (id순). restricted가 false면 빈 배열',
+    description: '저장된 허용 종목 목록 (그룹 전용 종목, id순)',
     type: ExerciseSummaryDto,
     isArray: true,
   })

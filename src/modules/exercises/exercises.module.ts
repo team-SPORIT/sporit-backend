@@ -7,5 +7,6 @@ import { ExercisesController } from './exercises.controller';
   imports: [GroupsModule],
   controllers: [ExercisesController],
   providers: [ExercisesService],
+  exports: [ExercisesService],
 })
 export class ExercisesModule {}
