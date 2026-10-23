@@ -7,6 +7,7 @@ import {
   HttpStatus,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -25,6 +26,7 @@ import {
 import { GroupsService } from './groups.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 import { GroupExercisesResponseDto } from './dto/group-exercises-response.dto';
 import { SetGroupExercisesDto } from './dto/set-group-exercises.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
@@ -86,6 +88,21 @@ export class GroupsController {
     @Param('id') id: string,
   ) {
     return this.groupsService.findOne(user.id, this.toBigIntId(id));
+  }
+
+  // 그룹 수정 (그룹장만, 지금은 색상만)
+  @Patch(':id')
+  @ApiOperation({ summary: '그룹 수정 (그룹장만, 색상)' })
+  update(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+    @Body() updateGroupDto: UpdateGroupDto,
+  ) {
+    return this.groupsService.update(
+      user.id,
+      this.toBigIntId(id),
+      updateGroupDto,
+    );
   }
 
   // 그룹 허용 종목 조회 (멤버만 가능)

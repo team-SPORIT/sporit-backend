@@ -19,6 +19,7 @@ import {
 } from '../../common/utils/kst-date.util';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { JoinGroupDto } from './dto/join-group.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 import { GroupFeedResponseDto } from './dto/group-feed-response.dto';
 import { GroupExercisesResponseDto } from './dto/group-exercises-response.dto';
 import { SetGroupExercisesDto } from './dto/set-group-exercises.dto';
@@ -116,6 +117,29 @@ export class GroupsService {
         memberCount: _count.group_members,
       };
     });
+  }
+
+  // 그룹 수정 (그룹장만, 부분 수정): 그룹이 없으면 404, 그룹장이 아니면 403, 보낸 필드가 없으면 400
+  async update(userId: string, groupId: bigint, dto: UpdateGroupDto) {
+    const group = await this.prisma.groups.findUnique({
+      where: { id: groupId },
+      select: { owner_id: true },
+    });
+    if (!group) {
+      throw new NotFoundException('그룹을 찾을 수 없습니다.');
+    }
+    if (group.owner_id !== userId) {
+      throw new ForbiddenException('그룹장만 그룹 정보를 수정할 수 있습니다.');
+    }
+    if (dto.color === undefined) {
+      throw new BadRequestException('수정할 color를 보내야 합니다.');
+    }
+
+    const updated = await this.prisma.groups.update({
+      where: { id: groupId },
+      data: { color: dto.color },
+    });
+    return this.withColorHex(updated);
   }
 
   // 내가 속한 그룹 중 허용 종목이 제한된(allow_all_exercises=false) 그룹과 그 허용 종목 (내 그룹 목록과 같은 정렬)
