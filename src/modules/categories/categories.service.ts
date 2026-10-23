@@ -113,8 +113,10 @@ export class CategoriesService {
 
   // 이 카테고리의 종목 매핑을 names로 교체한다 (호출부의 트랜잭션 안에서 실행)
   // - 이 카테고리에 있었지만 목록에서 빠진 이름은 매핑 삭제
-  // - 이미 다른 내 카테고리에 있던 이름은 이 카테고리로 이동(upsert), 없던 이름은 새로 매핑
+  // - 이미 다른 내 카테고리에 있던 이름은 이 카테고리로 이동, 없던 이름은 새로 매핑
   // 종목 이름의 존재 여부는 검증하지 않는다 (종목은 사용자/그룹마다 따로 있어 이름 기준으로만 연결)
+  // 최대 100개를 처리해야 해서 이름마다 upsert하면 interactive transaction 제한 시간(5초)을 넘길 수 있다.
+  // 그래서 "이 카테고리의 기존 매핑 + 이 이름들의 기존 매핑"을 한 번에 지우고 한 번에 다시 넣는다 (쿼리 3번)
   private async replaceMappings(
     tx: Prisma.TransactionClient,
     userId: string,
@@ -124,19 +126,18 @@ export class CategoriesService {
     const names = [...new Set(exerciseNames)];
 
     await tx.exercise_category_map.deleteMany({
-      where: { category_id: categoryId, exercise_name: { notIn: names } },
+      where: {
+        user_id: userId,
+        OR: [{ category_id: categoryId }, { exercise_name: { in: names } }],
+      },
     });
-    for (const name of names) {
-      await tx.exercise_category_map.upsert({
-        where: {
-          user_id_exercise_name: { user_id: userId, exercise_name: name },
-        },
-        create: {
+    if (names.length > 0) {
+      await tx.exercise_category_map.createMany({
+        data: names.map((name) => ({
           user_id: userId,
           exercise_name: name,
           category_id: categoryId,
-        },
-        update: { category_id: categoryId },
+        })),
       });
     }
   }
