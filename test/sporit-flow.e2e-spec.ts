@@ -34,10 +34,14 @@ interface GroupDetailResponse {
 
 interface RecordResponse {
   id: string;
+  start_image_url: string;
+  end_image_url: string;
 }
 
 interface FeedShare {
   author: { id: string };
+  startImageUrl: string;
+  endImageUrl: string;
 }
 
 interface FeedResponse {
@@ -151,11 +155,15 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .set('Authorization', `Bearer ${tokenA}`)
       .field('exerciseType', '러닝')
       .field('durationMin', '30')
-      .attach('file', TEST_IMAGE_PATH)
+      .attach('startFile', TEST_IMAGE_PATH)
+      .attach('endFile', TEST_IMAGE_PATH)
       .expect(201);
 
     const body = res.body as RecordResponse;
     expect(body.id).toBeDefined();
+    expect(body.start_image_url).toEqual(expect.any(String));
+    expect(body.end_image_url).toEqual(expect.any(String));
+    expect(body.start_image_url).not.toBe(body.end_image_url);
     recordId = body.id;
 
     const profileRes = await request(app.getHttpServer())
@@ -164,6 +172,22 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .expect(200);
 
     expect((profileRes.body as ProfileResponse).current_streak).toBe(1);
+  });
+
+  it('5-1. startFile 또는 endFile 한쪽만 보내면 POST /records는 400이다', async () => {
+    await request(app.getHttpServer())
+      .post('/records')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .field('exerciseType', '러닝')
+      .attach('startFile', TEST_IMAGE_PATH)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/records')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .field('exerciseType', '러닝')
+      .attach('endFile', TEST_IMAGE_PATH)
+      .expect(400);
   });
 
   it('6. A만 POST /shares로 공유하면 B가 아직 공유 전이라 그룹 스트릭은 0으로 유지된다', async () => {
@@ -187,7 +211,8 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
       .set('Authorization', `Bearer ${tokenB}`)
       .field('exerciseType', '요가')
       .field('durationMin', '20')
-      .attach('file', TEST_IMAGE_PATH)
+      .attach('startFile', TEST_IMAGE_PATH)
+      .attach('endFile', TEST_IMAGE_PATH)
       .expect(201);
     const recordIdB = (recordRes.body as RecordResponse).id;
 
@@ -215,6 +240,10 @@ describe('스포릿 핵심 플로우 (e2e)', () => {
     expect(body.locked).toBe(false);
     expect(body.records).toHaveLength(2);
     expect(body.records.map((record) => record.author.id)).toContain(userAId);
+    for (const record of body.records) {
+      expect(record.startImageUrl).toEqual(expect.any(String));
+      expect(record.endImageUrl).toEqual(expect.any(String));
+    }
   });
 });
 
@@ -313,7 +342,8 @@ describe('그룹 전체 스트릭 - 가입 당일 멤버 제외 (e2e)', () => {
       .post('/records')
       .set('Authorization', `Bearer ${tokenA}`)
       .field('exerciseType', '러닝')
-      .attach('file', TEST_IMAGE_PATH)
+      .attach('startFile', TEST_IMAGE_PATH)
+      .attach('endFile', TEST_IMAGE_PATH)
       .expect(201);
     await request(app.getHttpServer())
       .post('/shares')
@@ -325,7 +355,8 @@ describe('그룹 전체 스트릭 - 가입 당일 멤버 제외 (e2e)', () => {
       .post('/records')
       .set('Authorization', `Bearer ${tokenB}`)
       .field('exerciseType', '요가')
-      .attach('file', TEST_IMAGE_PATH)
+      .attach('startFile', TEST_IMAGE_PATH)
+      .attach('endFile', TEST_IMAGE_PATH)
       .expect(201);
     await request(app.getHttpServer())
       .post('/shares')
