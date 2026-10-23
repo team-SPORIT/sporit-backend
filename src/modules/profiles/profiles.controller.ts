@@ -1,6 +1,8 @@
 import {
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Patch,
   Post,
   Body,
@@ -80,5 +82,13 @@ export class ProfilesController {
     file: Express.Multer.File,
   ) {
     return this.profilesService.uploadAvatar(user.id, file);
+  }
+
+  // 회원 탈퇴 (계정과 관련 데이터 삭제, 본문 없음)
+  @Delete('me')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: '회원 탈퇴' })
+  withdraw(@CurrentUser() user: { id: string; email: string }) {
+    return this.profilesService.withdraw(user.id);
   }
 }
