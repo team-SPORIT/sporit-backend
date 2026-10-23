@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PALETTE_KEYS } from '../../../common/constants/palette.constants';
 
 // 그룹 기본 정보 (DB 컬럼 키 그대로 snake_case. id는 BigInt라 전역 toJSON에 의해 문자열로 직렬화됨)
 export class GroupResponseDto {
@@ -19,6 +20,22 @@ export class GroupResponseDto {
 
   @ApiProperty({ description: '그룹 생성 시각' })
   created_at: Date;
+
+  @ApiProperty({
+    description: '그룹 색상 팔레트 키',
+    enum: PALETTE_KEYS,
+    example: 'blue',
+  })
+  color: string;
+
+  @ApiProperty({
+    description:
+      '그룹 색상 hex 값 (color 키에 대응, 이전 팔레트의 키면 null). 이 필드는 camelCase로 추가된 필드이다',
+    type: String,
+    nullable: true,
+    example: '#0079FF',
+  })
+  colorHex: string | null;
 
   @ApiProperty({
     description:
