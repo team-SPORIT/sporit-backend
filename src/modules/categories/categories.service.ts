@@ -8,6 +8,7 @@ import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MAX_CATEGORIES_PER_USER } from './categories.constants';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { SetCategoryExercisesDto } from './dto/set-category-exercises.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
 // 카테고리 + 매핑된 종목 이름을 한 번에 가져오는 include (종목 이름은 이름순)
@@ -51,8 +52,19 @@ export class CategoriesService {
             );
           }
 
-          return tx.exercise_categories.create({
+          const created = await tx.exercise_categories.create({
             data: { user_id: userId, name: dto.name, color: dto.color },
+          });
+          // exerciseNames가 있으면 같은 트랜잭션에서 매핑한다
+          await this.replaceMappings(
+            tx,
+            userId,
+            created.id,
+            dto.exerciseNames ?? [],
+          );
+
+          return tx.exercise_categories.findUniqueOrThrow({
+            where: { id: created.id },
             include: CATEGORY_INCLUDE,
           });
         },
@@ -79,6 +91,53 @@ export class CategoriesService {
       return this.toResponse(category);
     } catch (error) {
       this.rethrowDuplicateName(error);
+    }
+  }
+
+  // 카테고리의 종목 목록을 통째로 교체 (빈 배열이면 비움). 내 카테고리가 아니거나 없으면 404
+  async setExercises(userId: string, id: bigint, dto: SetCategoryExercisesDto) {
+    await this.assertOwned(userId, id);
+
+    const category = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        await this.replaceMappings(tx, userId, id, dto.exerciseNames);
+
+        return tx.exercise_categories.findUniqueOrThrow({
+          where: { id },
+          include: CATEGORY_INCLUDE,
+        });
+      },
+    );
+    return this.toResponse(category);
+  }
+
+  // 이 카테고리의 종목 매핑을 names로 교체한다 (호출부의 트랜잭션 안에서 실행)
+  // - 이 카테고리에 있었지만 목록에서 빠진 이름은 매핑 삭제
+  // - 이미 다른 내 카테고리에 있던 이름은 이 카테고리로 이동(upsert), 없던 이름은 새로 매핑
+  // 종목 이름의 존재 여부는 검증하지 않는다 (종목은 사용자/그룹마다 따로 있어 이름 기준으로만 연결)
+  private async replaceMappings(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    categoryId: bigint,
+    exerciseNames: string[],
+  ) {
+    const names = [...new Set(exerciseNames)];
+
+    await tx.exercise_category_map.deleteMany({
+      where: { category_id: categoryId, exercise_name: { notIn: names } },
+    });
+    for (const name of names) {
+      await tx.exercise_category_map.upsert({
+        where: {
+          user_id_exercise_name: { user_id: userId, exercise_name: name },
+        },
+        create: {
+          user_id: userId,
+          exercise_name: name,
+          category_id: categoryId,
+        },
+        update: { category_id: categoryId },
+      });
     }
   }
 

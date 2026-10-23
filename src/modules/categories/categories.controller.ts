@@ -9,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -17,6 +18,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CATEGORY_COLORS } from './categories.constants';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { SetCategoryExercisesDto } from './dto/set-category-exercises.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
 @ApiTags('categories')
@@ -62,6 +64,21 @@ export class CategoriesController {
       user.id,
       this.toBigIntId(id),
       updateCategoryDto,
+    );
+  }
+
+  // 카테고리의 종목 목록 교체
+  @Put(':id/exercises')
+  @ApiOperation({ summary: '카테고리의 종목 목록 교체 (이름 기준)' })
+  setExercises(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+    @Body() setCategoryExercisesDto: SetCategoryExercisesDto,
+  ) {
+    return this.categoriesService.setExercises(
+      user.id,
+      this.toBigIntId(id),
+      setCategoryExercisesDto,
     );
   }
 
