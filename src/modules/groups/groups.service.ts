@@ -87,9 +87,10 @@ export class GroupsService {
   }
 
   // 내가 속한 그룹 목록 (MY_GROUPS_ORDER_BY 정렬)
-  async findMyGroups(userId: string) {
+  // groupsWhere로 그룹 조건을 더 좁힐 수 있다 (예: 특정 종목을 허용하는 그룹만)
+  async findMyGroups(userId: string, groupsWhere?: Prisma.groupsWhereInput) {
     const memberships = await this.prisma.group_members.findMany({
-      where: { user_id: userId },
+      where: { user_id: userId, groups: groupsWhere },
       include: {
         groups: {
           include: { _count: { select: { group_members: true } } },

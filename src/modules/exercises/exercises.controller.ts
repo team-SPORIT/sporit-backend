@@ -56,6 +56,19 @@ export class ExercisesController {
     return this.exercisesService.findSelectable(user.id);
   }
 
+  // 이 종목으로 기록을 공유할 수 있는 내 그룹 목록
+  @Get(':id/groups')
+  @ApiOperation({ summary: '종목별 공유 가능한 내 그룹 목록 조회' })
+  findGroups(
+    @CurrentUser() user: { id: string; email: string },
+    @Param('id') id: string,
+  ) {
+    return this.exercisesService.findGroupsForExercise(
+      user.id,
+      this.toBigIntId(id),
+    );
+  }
+
   // 개인 종목 추가
   @Post()
   @ApiOperation({ summary: '개인 종목 추가' })

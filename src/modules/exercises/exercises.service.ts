@@ -49,6 +49,28 @@ export class ExercisesService {
     };
   }
 
+  // 이 종목으로 기록을 공유할 수 있는 내 그룹 목록: 허용 종목이 없는 그룹(제한 없음) 또는 이 종목이 허용된 그룹
+  // 종목은 기본 종목이거나 내 종목이어야 한다 (없으면 404, 남의 개인 종목이면 403). 정렬/응답은 GET /groups와 동일
+  async findGroupsForExercise(userId: string, exerciseId: bigint) {
+    const exercise = await this.prisma.exercises.findUnique({
+      where: { id: exerciseId },
+      select: { owner_id: true },
+    });
+    if (!exercise) {
+      throw new NotFoundException('종목을 찾을 수 없습니다.');
+    }
+    if (exercise.owner_id !== null && exercise.owner_id !== userId) {
+      throw new ForbiddenException('사용할 수 없는 종목입니다.');
+    }
+
+    return this.groupsService.findMyGroups(userId, {
+      OR: [
+        { group_exercises: { none: {} } },
+        { group_exercises: { some: { exercise_id: exerciseId } } },
+      ],
+    });
+  }
+
   // 개인 종목 추가: 같은 이름의 기본 종목이 있거나 내 종목에 이미 있으면 409
   async create(userId: string, dto: CreateExerciseDto) {
     const defaultExercise = await this.prisma.exercises.findFirst({
