@@ -43,7 +43,10 @@ export class GroupsController {
 
   // 초대 코드로 그룹 참여
   @Post('join')
-  @ApiOperation({ summary: '초대 코드로 그룹 참여' })
+  @ApiOperation({
+    summary: '초대 코드로 그룹 참여',
+    description: '초대 코드는 대소문자 구분 없이 입력할 수 있다.',
+  })
   join(
     @CurrentUser() user: { id: string; email: string },
     @Body() joinGroupDto: JoinGroupDto,
