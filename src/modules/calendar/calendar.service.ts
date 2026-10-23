@@ -61,9 +61,48 @@ export class CalendarService {
       days.set(date, day);
     }
 
+    await this.attachCategories(userId, [...days.values()]);
+
     return {
       month: formatKstMonth(from),
       days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
     };
+  }
+
+  // 등장한 종목 이름들의 카테고리를 exercise_category_map(+exercise_categories)에서 한 번에 조회해 붙인다.
+  // 매핑이 없는 종목(미분류)은 categoryId/categoryName/color가 null로 남는다. color는 DB의 팔레트 키 그대로
+  private async attachCategories(userId: string, days: CalendarDayDto[]) {
+    const names = [
+      ...new Set(
+        days.flatMap((day) => day.exercises.map((e) => e.exerciseType)),
+      ),
+    ];
+    if (names.length === 0) return;
+
+    const mappings = await this.prisma.exercise_category_map.findMany({
+      where: { user_id: userId, exercise_name: { in: names } },
+      select: {
+        exercise_name: true,
+        exercise_categories: {
+          select: { id: true, name: true, color: true },
+        },
+      },
+    });
+    const categoryByName = new Map(
+      mappings.map((mapping) => [
+        mapping.exercise_name,
+        mapping.exercise_categories,
+      ]),
+    );
+
+    for (const day of days) {
+      for (const exercise of day.exercises) {
+        const category = categoryByName.get(exercise.exerciseType);
+        if (!category) continue;
+        exercise.categoryId = category.id;
+        exercise.categoryName = category.name;
+        exercise.color = category.color;
+      }
+    }
   }
 }
