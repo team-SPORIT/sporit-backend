@@ -1,9 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ReactionsService } from './reactions.service';
-import { ReactionsController } from './reactions.controller';
 
-@Module({
-  controllers: [ReactionsController],
-  providers: [ReactionsService],
-})
+@Module({})
 export class ReactionsModule {}
