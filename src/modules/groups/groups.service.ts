@@ -78,7 +78,7 @@ export class GroupsService {
     return group;
   }
 
-  // 내가 속한 그룹 목록 (참여 순)
+  // 내가 속한 그룹 목록: 최근 공유순(last_shared_at 내림차순, 공유가 없으면 맨 뒤), 같으면 참여 순
   async findMyGroups(userId: string) {
     const memberships = await this.prisma.group_members.findMany({
       where: { user_id: userId },
@@ -87,7 +87,10 @@ export class GroupsService {
           include: { _count: { select: { group_members: true } } },
         },
       },
-      orderBy: { joined_at: 'asc' },
+      orderBy: [
+        { groups: { last_shared_at: { sort: 'desc', nulls: 'last' } } },
+        { joined_at: 'asc' },
+      ],
     });
     return memberships.map(({ groups }) => {
       const { _count, ...group } = groups;
