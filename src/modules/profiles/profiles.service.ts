@@ -85,17 +85,24 @@ export class ProfilesService {
     });
   }
 
-  // 회원 탈퇴 처리 순서:
-  // 1. [DB 트랜잭션] 내가 그룹장인 그룹 정리 (여러 번 실행해도 안전: 위임/삭제가 끝난 그룹은 더 이상 내 그룹이 아니다)
-  // 2. Storage 삭제 대상(내 프로필/기록 사진) 경로를 미리 조회 (계정을 지우면 기록 정보가 사라지므로 삭제 전에 준비)
-  // 3. Supabase 계정(auth.users) 삭제 -> profiles 이하 데이터는 DB의 CASCADE로 함께 삭제된다. 실패하면 500
+  // 회원 탈퇴 처리 순서 (DB는 Supabase가 아닌 Railway PostgreSQL이라 auth.users 삭제가 profiles로 CASCADE되지 않는다):
+  // 1. [DB 트랜잭션] 내가 그룹장인 그룹 정리 (위임/삭제가 끝난 그룹은 더 이상 내 그룹이 아니므로 재실행해도 안전)
+  // 2. profiles 행 삭제 -> 기록/댓글/좋아요/통계 등 나머지 데이터는 DB의 CASCADE로 함께 삭제.
+  //    (삭제 전에 Storage 삭제 대상(프로필/기록 사진) 경로를 미리 조회: 행이 지워져도 Storage는 폴더 기준이라 재시도 시에도 조회 가능)
+  // 3. Supabase 계정 삭제(auth.admin.deleteUser). 실패하면 500
   // 4. 계정 삭제가 성공한 뒤 Storage 사진 삭제. 실패해도 예외를 던지지 않고 경고 로그만 남긴다(탈퇴는 성공으로 응답)
-  // 프로필이 이미 없는 경우(JWT는 유효하지만 계정/프로필이 없음)에도 에러 없이 성공으로 처리해 재시도해도 안전하다(멱등).
+  // 3에서 실패해도 JWT가 유효한 채로 재요청하면 1·2는 대상이 없어 no-op이고 3부터 다시 시도하므로 재시도해도 안전하다(멱등).
   async withdraw(userId: string) {
     await this.handleOwnedGroups(userId);
     const storageTargets = await this.collectStorageTargets(userId);
+    await this.deleteProfile(userId);
     await this.deleteAuthUser(userId);
     await this.cleanupStorage(userId, storageTargets);
+  }
+
+  // profiles 행 삭제. 이미 없으면 0건 삭제로 끝나므로 재시도해도 에러가 없다
+  private async deleteProfile(userId: string) {
+    await this.prisma.profiles.deleteMany({ where: { id: userId } });
   }
 
   // 내가 그룹장(owner_id)인 모든 그룹을 처리한다. 그룹장이 지워지면 groups가 CASCADE로 통째로 삭제되어
@@ -213,7 +220,7 @@ export class ProfilesService {
 
   // 그룹 전용 종목(exercises.group_id)을 참조하는 기록과 종목 통계를 작성자별 "같은 이름의 개인 종목"으로 옮긴다.
   // 작성자에게 같은 이름의 개인 종목이 없으면 새로 만든다. 탈퇴하는 그룹장 본인의 기록도 같은 방식으로 옮긴다
-  // (계정 삭제가 실패해 재시도하는 경우에도 데이터가 먼저 사라지지 않도록 기록을 삭제하지 않고 이관한다).
+  // (기록을 삭제하지 않고 이관해야 이후 profiles CASCADE로 지워질 때 다른 멤버의 공유/통계에 영향이 없다).
   // 통계는 작성자에게 같은 이름의 개인 종목 통계가 이미 있으면 합산(total_seconds, total_count)하고 last_at은 더 최근 값을 쓴다.
   private async migrateGroupExercisesToPersonal(
     tx: Prisma.TransactionClient,
