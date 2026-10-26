@@ -30,12 +30,25 @@ const admin = createClient(
 
 type TestUser = { email: string; id: string; token: string };
 
-// 회원 탈퇴: 그룹장 위임/삭제, 전용 종목 참조 기록 이관, Storage 정리, 다른 유저 데이터 보존
+// 회원 탈퇴: 그룹 정리 -> profiles 삭제(나머지 데이터는 CASCADE) -> Supabase 계정 삭제 -> Storage 정리
+// 그룹장 위임/삭제, 전용 종목 참조 기록 이관, 다른 유저 데이터 보존, 재시도 안전성을 검증한다
 describe('회원 탈퇴 (e2e)', () => {
   let app: INestApplication<App>;
 
   const password = 'Test1234!';
-  const names = ['a', 'm', 'b', 'o2', 'x', 'y', 's', 't', 'u', 'w'] as const;
+  const names = [
+    'a',
+    'm',
+    'b',
+    'o2',
+    'x',
+    'y',
+    's',
+    't',
+    'u',
+    'w',
+    'z',
+  ] as const;
   const users = Object.fromEntries(
     names.map((name) => [
       name,
@@ -286,6 +299,9 @@ describe('회원 탈퇴 (e2e)', () => {
     await withdraw(o2).expect(204);
 
     expect(await authUserExists(o2.id)).toBe(false);
+    expect(
+      await prisma.profiles.findUnique({ where: { id: o2.id } }),
+    ).toBeNull();
     const groupRow = await prisma.groups.findUniqueOrThrow({
       where: { id: groupId },
     });
@@ -340,6 +356,10 @@ describe('회원 탈퇴 (e2e)', () => {
     await withdraw(s).expect(204);
 
     expect(await authUserExists(s.id)).toBe(false);
+    expect(
+      await prisma.profiles.findUnique({ where: { id: s.id } }),
+    ).toBeNull();
+    expect(await prisma.records.count({ where: { user_id: s.id } })).toBe(0);
     expect(
       await prisma.groups.findUnique({ where: { id: BigInt(group.id) } }),
     ).toBeNull();
@@ -408,6 +428,9 @@ describe('회원 탈퇴 (e2e)', () => {
       0,
     );
     expect(await authUserExists(t.id)).toBe(false);
+    expect(
+      await prisma.profiles.findUnique({ where: { id: t.id } }),
+    ).toBeNull();
 
     // U의 기록은 U의 개인 종목 '플랭크'로 이관됨
     const movedRecord = await prisma.records.findUniqueOrThrow({
@@ -463,6 +486,9 @@ describe('회원 탈퇴 (e2e)', () => {
     expect(await listFiles('profile-images', w.id)).toEqual([]);
     expect(await listFiles('record-images', `records/${w.id}`)).toEqual([]);
     expect(await authUserExists(w.id)).toBe(false);
+    expect(
+      await prisma.profiles.findUnique({ where: { id: w.id } }),
+    ).toBeNull();
   });
 
   it('6. 탈퇴한 유저의 토큰으로 요청하면 정상 동작하지 않고, 탈퇴를 다시 요청해도 204이다(멱등)', async () => {
@@ -475,7 +501,22 @@ describe('회원 탈퇴 (e2e)', () => {
     await withdraw(w).expect(204);
   });
 
-  it('7. 토큰이 없으면 401이다', async () => {
+  it('7. 프로필 삭제 후 Supabase 계정 삭제가 실패했던 상태(프로필 없음, 계정 남음)에서 다시 탈퇴하면 204이고 계정이 삭제된다(재시도 안전)', async () => {
+    const { z } = users;
+    const exZ = await createExercise(z, '러닝');
+    await createRecord(z, exZ, 100);
+
+    // 2단계(profiles 삭제)까지만 끝나고 3단계(계정 삭제)가 실패한 상태를 재현
+    await prisma.profiles.delete({ where: { id: z.id } });
+    expect(await authUserExists(z.id)).toBe(true);
+    expect(await prisma.records.count({ where: { user_id: z.id } })).toBe(0);
+
+    await withdraw(z).expect(204);
+
+    expect(await authUserExists(z.id)).toBe(false);
+  });
+
+  it('8. 토큰이 없으면 401이다', async () => {
     await request(server()).delete('/profiles/me').expect(401);
   });
 });
