@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { isForeignKeyViolation } from '../../common/utils/prisma-error.util';
 import { GroupsService } from '../groups/groups.service';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { SelectableExercisesResponseDto } from './dto/selectable-exercises-response.dto';
@@ -117,11 +118,8 @@ export class ExercisesService {
     try {
       await this.prisma.exercises.delete({ where: { id } });
     } catch (error) {
-      // P2003: records가 이 종목을 참조 중 (FK RESTRICT)
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2003'
-      ) {
+      // records가 이 종목을 참조 중 (FK RESTRICT)
+      if (isForeignKeyViolation(error)) {
         throw new ConflictException('기록이 있는 종목은 삭제할 수 없습니다.');
       }
       throw error;
