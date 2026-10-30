@@ -12,6 +12,7 @@ import {
   randomPaletteKey,
 } from '../../common/constants/palette.constants';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
 import {
   getKstToday,
   kstDateToUtcRange,
@@ -37,7 +38,10 @@ const MY_GROUPS_ORDER_BY: Prisma.group_membersOrderByWithRelationInput[] = [
 
 @Injectable()
 export class GroupsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   // 그룹 생성 (생성자를 owner이자 첫 멤버로 등록)
   // color(생략하면 무작위 배정)와 허용 종목(allowAll/names)을 함께 받아 하나의 트랜잭션으로 처리한다:
@@ -219,7 +223,21 @@ export class GroupsService {
         },
       },
     });
-    return group && this.withColorHex(group);
+    if (!group) return group;
+
+    // 멤버 프로필 이미지는 key/외부 URL을 응답용 URL로 바꿔서 내려준다
+    const members = await Promise.all(
+      group.group_members.map(async (member) => ({
+        ...member,
+        profiles: {
+          ...member.profiles,
+          profile_image: await this.storage.resolveImageUrl(
+            member.profiles.profile_image,
+          ),
+        },
+      })),
+    );
+    return this.withColorHex({ ...group, group_members: members });
   }
 
   // 그룹 허용 종목 조회 (멤버만 가능). allow_all_exercises가 true면 제한 없음
@@ -389,23 +407,34 @@ export class GroupsService {
     });
     const likedShareIds = new Set(myReactions.map((r) => r.share_id));
 
+    // 기록 사진과 작성자 프로필 이미지를 응답용 URL로 바꾼다 (null은 null 유지)
+    const imageUrls = await Promise.all(
+      shares.map((share) =>
+        Promise.all([
+          this.storage.resolveImageUrl(share.records.start_image_url),
+          this.storage.resolveImageUrl(share.records.end_image_url),
+          this.storage.resolveImageUrl(share.records.profiles.profile_image),
+        ]),
+      ),
+    );
+
     return {
       locked: false,
-      records: shares.map((share) => ({
+      records: shares.map((share, index) => ({
         shareId: share.id,
         recordId: share.record_id,
         exerciseId: share.records.exercise_id,
         exerciseType: share.records.exercises.name,
         durationSec: share.records.duration_sec,
         comment: share.records.comment,
-        startImageUrl: share.records.start_image_url,
-        endImageUrl: share.records.end_image_url,
+        startImageUrl: imageUrls[index][0]!,
+        endImageUrl: imageUrls[index][1]!,
         recordDate: share.records.record_date,
         sharedAt: share.shared_at,
         author: {
           id: share.records.profiles.id,
           nickname: share.records.profiles.nickname,
-          profileImage: share.records.profiles.profile_image,
+          profileImage: imageUrls[index][2],
         },
         likeCount: share._count.record_reactions,
         commentCount: share._count.record_comments,

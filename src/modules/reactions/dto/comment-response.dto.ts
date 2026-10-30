@@ -8,7 +8,11 @@ export class CommentAuthorDto {
   @ApiProperty({ description: '닉네임' })
   nickname: string;
 
-  @ApiProperty({ description: '프로필 이미지 URL', nullable: true })
+  @ApiProperty({
+    description:
+      '프로필 이미지 URL (업로드한 이미지는 만료되는 임시 URL: 임시 URL이라 일정 시간(기본 1시간) 후 만료된다. 저장해 두지 말고 만료되면 API를 다시 호출해 새 URL을 받는다)',
+    nullable: true,
+  })
   profile_image: string | null;
 }
 

@@ -11,6 +11,7 @@ import {
   disconnectPrisma,
   prisma,
 } from './helpers/cleanup.helper';
+import { listKeys } from './helpers/storage.helper';
 
 const TEST_IMAGE_PATH = path.join(__dirname, 'fixtures', 'test-image.png');
 const runId = Date.now();
@@ -22,7 +23,7 @@ interface IdResponse {
   invite_code: string;
 }
 
-// Storage 확인용 service_role 클라이언트 (테스트 전용)
+// Supabase 계정 확인용 service_role 클라이언트 (테스트 전용)
 const admin = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -134,14 +135,6 @@ describe('회원 탈퇴 (e2e)', () => {
   const authUserExists = async (userId: string) => {
     const { data, error } = await admin.auth.admin.getUserById(userId);
     return !error && !!data.user;
-  };
-
-  const listFiles = async (bucket: string, folder: string) => {
-    const { data, error } = await admin.storage
-      .from(bucket)
-      .list(folder, { limit: 100 });
-    if (error) throw error;
-    return data.filter((item) => item.id);
   };
 
   beforeAll(async () => {
@@ -476,15 +469,13 @@ describe('회원 탈퇴 (e2e)', () => {
       .expect(201);
 
     // 탈퇴 전에는 파일이 있다
-    expect((await listFiles('profile-images', w.id)).length).toBe(1);
-    expect((await listFiles('record-images', `records/${w.id}`)).length).toBe(
-      2,
-    );
+    expect((await listKeys(`profiles/${w.id}/`)).length).toBe(1);
+    expect((await listKeys(`records/${w.id}/`)).length).toBe(2);
 
     await withdraw(w).expect(204);
 
-    expect(await listFiles('profile-images', w.id)).toEqual([]);
-    expect(await listFiles('record-images', `records/${w.id}`)).toEqual([]);
+    expect(await listKeys(`profiles/${w.id}/`)).toEqual([]);
+    expect(await listKeys(`records/${w.id}/`)).toEqual([]);
     expect(await authUserExists(w.id)).toBe(false);
     expect(
       await prisma.profiles.findUnique({ where: { id: w.id } }),

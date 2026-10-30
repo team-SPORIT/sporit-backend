@@ -37,16 +37,18 @@ export class RecentRecordItemDto {
   comment: string | null;
 
   @ApiProperty({
-    description: '시작 사진 URL',
+    description:
+      '시작 사진 URL (만료되는 임시 URL: 임시 URL이라 일정 시간(기본 1시간) 후 만료된다. 저장해 두지 말고 만료되면 API를 다시 호출해 새 URL을 받는다)',
     example:
-      'https://example.supabase.co/storage/v1/object/public/record-images/records/uid/uuid-start.jpg',
+      'https://storage.example.com/bucket/records/uid/uuid-start.jpg?X-Amz-Expires=3600&X-Amz-Signature=...',
   })
   startImageUrl: string;
 
   @ApiProperty({
-    description: '종료 사진 URL',
+    description:
+      '종료 사진 URL (만료되는 임시 URL: 임시 URL이라 일정 시간(기본 1시간) 후 만료된다. 저장해 두지 말고 만료되면 API를 다시 호출해 새 URL을 받는다)',
     example:
-      'https://example.supabase.co/storage/v1/object/public/record-images/records/uid/uuid-end.jpg',
+      'https://storage.example.com/bucket/records/uid/uuid-end.jpg?X-Amz-Expires=3600&X-Amz-Signature=...',
   })
   endImageUrl: string;
 
