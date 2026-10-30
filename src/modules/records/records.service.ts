@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SupabaseService } from '../../common/supabase/supabase.service';
+import {
+  isExternalUrl,
+  StorageService,
+} from '../../common/storage/storage.service';
 import {
   formatKstDate,
   getKstRecentRange,
@@ -17,11 +20,7 @@ import { ExercisesService } from '../exercises/exercises.service';
 import { CreateRecordDto } from './dto/create-record.dto';
 import type { RecordImageFiles } from './pipes/record-images.pipe';
 import { RecentRecordsResponseDto } from './dto/recent-records-response.dto';
-import {
-  MIME_TO_EXT,
-  RECENT_DAYS,
-  RECORD_IMAGES_BUCKET,
-} from './records.constants';
+import { MIME_TO_EXT, RECENT_DAYS } from './records.constants';
 
 // 기록 응답에 종목 이름을 함께 내려주기 위한 include
 const RECORD_EXERCISE_INCLUDE = {
@@ -32,7 +31,7 @@ const RECORD_EXERCISE_INCLUDE = {
 export class RecordsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly supabase: SupabaseService,
+    private readonly storage: StorageService,
     private readonly exercisesService: ExercisesService,
   ) {}
 
@@ -44,32 +43,34 @@ export class RecordsService {
     const exerciseId = BigInt(dto.exerciseId);
     await this.exercisesService.assertUsableExercise(userId, exerciseId);
 
-    const { startPath, endPath, startImageUrl, endImageUrl } =
-      await this.uploadRecordImages(userId, files);
+    const { startKey, endKey } = await this.uploadRecordImages(userId, files);
     const recordDate = getKstToday();
 
+    let record;
     try {
-      return await this.createRecordInTransaction(
+      record = await this.createRecordInTransaction(
         userId,
         dto,
         exerciseId,
         recordDate,
-        startImageUrl,
-        endImageUrl,
+        startKey,
+        endKey,
       );
     } catch (error) {
-      await this.removeFromStorage([startPath, endPath]);
+      await this.removeFromStorage([startKey, endKey]);
       throw error;
     }
+    return this.toRecordResponse(record);
   }
 
+  // 트랜잭션은 DB 작업만 담당하고, 응답용 URL 변환(외부 호출)은 트랜잭션 밖에서 한다
   private createRecordInTransaction(
     userId: string,
     dto: CreateRecordDto,
     exerciseId: bigint,
     recordDate: Date,
-    startImageUrl: string,
-    endImageUrl: string,
+    startKey: string,
+    endKey: string,
   ) {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const record = await tx.records.create({
@@ -78,8 +79,8 @@ export class RecordsService {
           exercise_id: exerciseId,
           duration_sec: dto.durationSec,
           comment: dto.comment,
-          start_image_url: startImageUrl,
-          end_image_url: endImageUrl,
+          start_image_url: startKey,
+          end_image_url: endKey,
           record_date: recordDate,
         },
         include: RECORD_EXERCISE_INCLUDE,
@@ -87,16 +88,30 @@ export class RecordsService {
 
       await this.upsertExerciseStats(tx, userId, exerciseId, dto.durationSec);
 
-      return this.toRecordResponse(record);
+      return record;
     });
   }
 
   // 응답에 종목 이름(exercise_type)을 평탄화해서 내려준다 (exercise_id는 기록 행에 그대로 포함)
-  private toRecordResponse<T extends { exercises: { name: string } }>(
-    record: T,
-  ) {
+  // 시작/종료 이미지는 DB의 object key를 presigned URL로 바꿔서 내려준다
+  private async toRecordResponse<
+    T extends {
+      exercises: { name: string };
+      start_image_url: string;
+      end_image_url: string;
+    },
+  >(record: T) {
     const { exercises, ...rest } = record;
-    return { ...rest, exercise_type: exercises.name };
+    const [start_image_url, end_image_url] = await Promise.all([
+      this.storage.resolveImageUrl(record.start_image_url),
+      this.storage.resolveImageUrl(record.end_image_url),
+    ]);
+    return {
+      ...rest,
+      start_image_url: start_image_url!,
+      end_image_url: end_image_url!,
+      exercise_type: exercises.name,
+    };
   }
 
   // 내 월별 기록 조회 (캘린더용), 날짜순 정렬
@@ -113,7 +128,7 @@ export class RecordsService {
       orderBy: { record_date: 'asc' },
     });
 
-    return records.map((record) => this.toRecordResponse(record));
+    return Promise.all(records.map((record) => this.toRecordResponse(record)));
   }
 
   // 내 최근 기록 조회: KST 오늘을 포함한 최근 RECENT_DAYS일(record_date 기준)을 종목 이름별로 묶어서 내려준다.
@@ -147,7 +162,15 @@ export class RecordsService {
       string,
       RecentRecordsResponseDto['exercises'][number]
     >();
-    for (const record of records) {
+    const imageUrls = await Promise.all(
+      records.map((record) =>
+        Promise.all([
+          this.storage.resolveImageUrl(record.start_image_url),
+          this.storage.resolveImageUrl(record.end_image_url),
+        ]),
+      ),
+    );
+    for (const [index, record] of records.entries()) {
       const exerciseType = record.exercises.name;
       const group = byName.get(exerciseType) ?? {
         exerciseType,
@@ -163,8 +186,8 @@ export class RecordsService {
         exerciseType,
         durationSec: record.duration_sec,
         comment: record.comment,
-        startImageUrl: record.start_image_url,
-        endImageUrl: record.end_image_url,
+        startImageUrl: imageUrls[index][0]!,
+        endImageUrl: imageUrls[index][1]!,
         recordDate: formatKstDate(record.record_date),
         createdAt: record.created_at,
         sharedGroups: record.record_shares.map(({ groups }) => ({
@@ -202,7 +225,11 @@ export class RecordsService {
   // 기록 삭제 (본인 기록만)
   // MVP: 종목 통계 역산은 복잡하므로 이번엔 처리하지 않는다 (추후 논의)
   async remove(userId: string, id: bigint) {
-    const record = await this.findOne(userId, id);
+    // 이미지는 응답용 URL이 아닌 DB에 저장된 key가 필요하므로 원본 행을 조회한다
+    const record = await this.prisma.records.findUnique({ where: { id } });
+    if (!record || record.user_id !== userId) {
+      throw new NotFoundException('기록을 찾을 수 없습니다.');
+    }
 
     await this.prisma.records.delete({ where: { id } });
     await this.deleteRecordImages([
@@ -211,27 +238,22 @@ export class RecordsService {
     ]);
   }
 
-  // 시작/종료 이미지를 record-images 버킷에 업로드하고 경로와 public URL 반환
+  // 시작/종료 이미지를 버킷에 업로드하고 object key를 반환 (key는 records/{userId}/ 아래에 두어 탈퇴 시 prefix로 한 번에 지운다)
   // 하나라도 실패하면 이미 올라간 파일을 지우고 에러를 던진다
   private async uploadRecordImages(userId: string, files: RecordImageFiles) {
-    const storage = this.supabase
-      .getClient()
-      .storage.from(RECORD_IMAGES_BUCKET);
     const id = randomUUID();
-    const startPath = `records/${userId}/${id}-start.${MIME_TO_EXT[files.startFile.mimetype]}`;
-    const endPath = `records/${userId}/${id}-end.${MIME_TO_EXT[files.endFile.mimetype]}`;
+    const startKey = `records/${userId}/${id}-start.${MIME_TO_EXT[files.startFile.mimetype]}`;
+    const endKey = `records/${userId}/${id}-end.${MIME_TO_EXT[files.endFile.mimetype]}`;
 
     const uploads = [
-      { path: startPath, file: files.startFile },
-      { path: endPath, file: files.endFile },
+      { key: startKey, file: files.startFile },
+      { key: endKey, file: files.endFile },
     ];
     const results = await Promise.all(
-      uploads.map(async ({ path, file }) => {
+      uploads.map(async ({ key, file }) => {
         try {
-          const { error } = await storage.upload(path, file.buffer, {
-            contentType: file.mimetype,
-          });
-          return !error;
+          await this.storage.upload(key, file.buffer, file.mimetype);
+          return true;
         } catch {
           return false;
         }
@@ -240,43 +262,33 @@ export class RecordsService {
 
     if (results.includes(false)) {
       await this.removeFromStorage(
-        uploads.filter((_, i) => results[i]).map(({ path }) => path),
+        uploads.filter((_, i) => results[i]).map(({ key }) => key),
       );
       throw new InternalServerErrorException('이미지 업로드에 실패했습니다.');
     }
 
-    return {
-      startPath,
-      endPath,
-      startImageUrl: storage.getPublicUrl(startPath).data.publicUrl,
-      endImageUrl: storage.getPublicUrl(endPath).data.publicUrl,
-    };
+    return { startKey, endKey };
   }
 
   // Storage 파일 삭제 (실패해도 무시: 호출부의 본래 에러/성공 흐름을 유지)
-  private async removeFromStorage(paths: string[]) {
-    if (paths.length === 0) return;
-    try {
-      await this.supabase
-        .getClient()
-        .storage.from(RECORD_IMAGES_BUCKET)
-        .remove(paths);
-    } catch {
-      // 삭제 실패는 무시
-    }
+  private async removeFromStorage(keys: string[]) {
+    await Promise.all(
+      keys.map(async (key) => {
+        try {
+          await this.storage.delete(key);
+        } catch {
+          // 삭제 실패는 무시
+        }
+      }),
+    );
   }
 
-  // 이미지 URL들에서 버킷 내부 경로를 추출해 Storage에서 삭제 (실패해도 기록 삭제 자체는 성공 처리)
-  private async deleteRecordImages(imageUrls: string[]) {
-    const marker = `/${RECORD_IMAGES_BUCKET}/`;
-    const paths = imageUrls
-      .map((url) => {
-        const index = url.indexOf(marker);
-        return index === -1 ? null : url.slice(index + marker.length);
-      })
-      .filter((path): path is string => path !== null);
-
-    await this.removeFromStorage(paths);
+  // 기록 삭제 시 이미지 파일 삭제 (실패해도 기록 삭제 자체는 성공 처리).
+  // 외부 URL(이전 전 Supabase URL 등)은 이 버킷에 없으므로 건너뛴다
+  private async deleteRecordImages(imageValues: string[]) {
+    await this.removeFromStorage(
+      imageValues.filter((value) => !isExternalUrl(value)),
+    );
   }
 
   // 종목별 통계 upsert: 횟수 +1, 시간(초) 누적 (값이 없으면 0)

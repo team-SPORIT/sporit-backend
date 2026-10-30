@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   Injectable,
   InternalServerErrorException,
@@ -7,6 +8,10 @@ import {
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SupabaseService } from '../../common/supabase/supabase.service';
+import {
+  isExternalUrl,
+  StorageService,
+} from '../../common/storage/storage.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RECORD_IMAGES_BUCKET } from '../records/records.constants';
 import { MIME_TO_EXT, PROFILE_IMAGES_BUCKET } from './profiles.constants';
@@ -18,6 +23,7 @@ export class ProfilesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supabase: SupabaseService,
+    private readonly storage: StorageService,
   ) {}
 
   // 로그인한 유저 본인의 프로필 조회
@@ -30,59 +36,85 @@ export class ProfilesService {
       throw new NotFoundException('프로필을 찾을 수 없습니다.');
     }
 
-    return profile;
+    return this.withImageUrl(profile);
   }
 
   // 로그인한 유저 본인의 프로필 부분 수정
   // dto의 필드가 undefined면 Prisma가 해당 컬럼을 update data에서 제외 -> 기존 값 유지
   async updateMe(userId: string, dto: UpdateProfileDto) {
-    return this.prisma.profiles.update({
+    const { profile_image, ...rest } = dto;
+    const updated = await this.prisma.profiles.update({
       where: { id: userId },
-      data: dto,
+      data: {
+        ...rest,
+        // 이미지는 POST /profiles/me/avatar 로만 바꾼다. 여기서는 외부 http(s) URL만 받는다:
+        // object key를 직접 넣으면 남의 파일에 접근하는 URL이 만들어지고, 응답으로 받은 presigned URL을 그대로 되돌려 보내면
+        // 만료되는 URL이 저장되기 때문이다 (그런 값은 무시하고 기존 이미지를 유지한다)
+        ...(profile_image !== undefined &&
+        this.isStorableProfileUrl(profile_image)
+          ? { profile_image }
+          : {}),
+      },
     });
+    return this.withImageUrl(updated);
   }
 
-  // 프로필 이미지 업로드 - 서버가 파일을 받아 Storage에 올리고, publicUrl을 profile_image에 저장까지 처리
+  // 프로필 이미지 업로드 - 서버가 파일을 받아 버킷에 올리고, object key를 profile_image에 저장까지 처리
+  // (응답의 profile_image는 1시간 등 짧게 유효한 presigned URL)
   async uploadAvatar(userId: string, file: Express.Multer.File) {
-    const storage = this.supabase
-      .getClient()
-      .storage.from(PROFILE_IMAGES_BUCKET);
-
-    // 새 이미지를 올리기 전에 기존 이미지가 있으면 삭제 (orphan 파일 누적 방지)
     const current = await this.prisma.profiles.findUnique({
       where: { id: userId },
       select: { profile_image: true },
     });
 
-    if (current?.profile_image) {
-      const oldPath = this.extractStoragePath(current.profile_image);
-      if (oldPath) {
-        try {
-          await storage.remove([oldPath]);
-        } catch {
-          // 기존 파일 삭제가 실패해도 새 업로드는 계속 진행
-        }
-      }
-    }
-
-    const ext = MIME_TO_EXT[file.mimetype];
-    const path = `${userId}/avatar_${Date.now()}.${ext}`;
-
-    const { error } = await storage.upload(path, file.buffer, {
-      contentType: file.mimetype,
-      upsert: true,
-    });
-
-    if (error) {
+    const key = `profiles/${userId}/${randomUUID()}.${MIME_TO_EXT[file.mimetype]}`;
+    try {
+      await this.storage.upload(key, file.buffer, file.mimetype);
+    } catch {
       throw new InternalServerErrorException('이미지 업로드에 실패했습니다.');
     }
 
-    const { data: publicUrlData } = storage.getPublicUrl(path);
+    let updated;
+    try {
+      updated = await this.prisma.profiles.update({
+        where: { id: userId },
+        data: { profile_image: key },
+      });
+    } catch (error) {
+      await this.deleteImageQuietly(key); // DB 저장 실패 시 방금 올린 파일이 고아로 남지 않게 지운다
+      throw error;
+    }
 
-    return this.prisma.profiles.update({
-      where: { id: userId },
-      data: { profile_image: publicUrlData.publicUrl },
-    });
+    // 새 이미지가 저장된 뒤에 기존 이미지를 지운다 (orphan 누적 방지, 실패해도 무시).
+    // 기존 값이 외부 URL(소셜 아바타, 이전 전 Supabase URL)이면 지울 파일이 없다
+    if (current?.profile_image && !isExternalUrl(current.profile_image)) {
+      await this.deleteImageQuietly(current.profile_image);
+    }
+
+    return this.withImageUrl(updated);
+  }
+
+  // profile_image(key 또는 외부 URL)를 응답용 URL로 바꾼다
+  private async withImageUrl<T extends { profile_image: string | null }>(
+    profile: T,
+  ): Promise<T> {
+    return {
+      ...profile,
+      profile_image: await this.storage.resolveImageUrl(profile.profile_image),
+    };
+  }
+
+  // PATCH로 저장해도 되는 값인지: 외부 http(s) URL이면서 이 버킷의 presigned URL(서명 포함)이 아닌 것
+  private isStorableProfileUrl(value: string): boolean {
+    return isExternalUrl(value) && !value.includes('X-Amz-Signature');
+  }
+
+  private async deleteImageQuietly(key: string) {
+    try {
+      await this.storage.delete(key);
+    } catch {
+      // 삭제 실패는 무시
+    }
   }
 
   // 회원 탈퇴 처리 순서 (DB는 Supabase가 아닌 Railway PostgreSQL이라 auth.users 삭제가 profiles로 CASCADE되지 않는다):
@@ -347,18 +379,5 @@ export class ProfilesService {
       `계정 삭제 실패 (userId=${userId}, status=${error.status}, code=${error.code})`,
     );
     throw new InternalServerErrorException('회원 탈퇴에 실패했습니다.');
-  }
-
-  // profile_image의 public URL에서 버킷 내부 경로(path)를 추출
-  // 예: {SUPABASE_URL}/storage/v1/object/public/profile-images/{userId}/avatar_xxx.jpg -> {userId}/avatar_xxx.jpg
-  private extractStoragePath(publicUrl: string): string | null {
-    const marker = `/${PROFILE_IMAGES_BUCKET}/`;
-    const index = publicUrl.indexOf(marker);
-
-    if (index === -1) {
-      return null;
-    }
-
-    return publicUrl.slice(index + marker.length);
   }
 }

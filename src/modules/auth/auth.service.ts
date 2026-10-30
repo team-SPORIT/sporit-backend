@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../common/storage/storage.service';
 
 interface SupabaseUser {
   id: string;
@@ -10,7 +11,10 @@ interface SupabaseUser {
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
   // 앱이 로그인 직후 최초 1회 호출: profiles에 없으면 새로 만들고, 있으면 그대로 반환
   async syncProfile(user: SupabaseUser) {
     let isNew = false;
@@ -22,6 +26,9 @@ export class AuthService {
     if (existing) {
       return {
         ...existing,
+        profile_image: await this.storage.resolveImageUrl(
+          existing.profile_image,
+        ),
         isNew: isNew,
       };
     }
@@ -43,6 +50,9 @@ export class AuthService {
 
     return {
       ...logginedUser,
+      profile_image: await this.storage.resolveImageUrl(
+        logginedUser?.profile_image,
+      ),
       isNew: isNew,
     };
   }
