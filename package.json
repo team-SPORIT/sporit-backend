@@ -19,7 +19,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "migrate:storage": "ts-node scripts/migrate-storage.ts"
+    "migrate:storage": "tsc -p tsconfig.scripts.json && node dist-scripts/scripts/migrate-storage.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1160.0",
