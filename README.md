@@ -12,6 +12,8 @@
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | 이미지 저장소(Railway Buckets, S3 호환, 비공개 버킷). `S3_REGION`은 `auto` |
 | `S3_URL_EXPIRES_SEC` | (선택) 이미지 presigned URL 만료 시간(초). 기본 `3600` |
 | `S3_FORCE_PATH_STYLE` | (선택) 버킷 접속이 안 될 때 `true`로 바꿔 시도한다(path-style 주소). 기본 `false` |
+| `SLOW_REQUEST_MS` | (선택) 응답 시간이 이 값(ms) 이상인 요청을 `[SLOW]` 경고로 표시한다. 기본 `500` |
+| `SLOW_QUERY_MS` | (선택) 이 값(ms) 이상 걸린 DB 쿼리를 `[SLOW QUERY]` 경고로 남긴다. 기본 `200` |
 
 DB에는 `public` 스키마만 있고 Supabase `auth` 스키마는 없다. `profiles.id`는 Supabase 유저 ID와 같은 값이지만 `auth.users`로의 외래키는 없으므로, 회원 탈퇴 시 `profiles` 행을 먼저 지우고 Supabase 계정을 삭제한다.
 
@@ -31,3 +33,11 @@ DB에는 `public` 스키마만 있고 Supabase `auth` 스키마는 없다. `prof
 npm run migrate:storage -- --dry-run   # 대상만 출력 (업로드/DB 변경 없음)
 npm run migrate:storage                # 실제 이전
 ```
+
+## 성능 로그
+
+서버 성능 확인용 로그를 남긴다. `NODE_ENV=test`(E2E)에서는 꺼진다.
+
+- **요청 로그**: 요청마다 `GET /groups 200 123ms` (메서드, 쿼리스트링 제외 경로, 상태코드, 소요시간). `SLOW_REQUEST_MS` 이상이면 `warn`으로 `[SLOW]`가 붙는다. `GET /`와 Swagger(`/api-docs`)는 제외한다. 인증 가드에서 거절된 401과 존재하지 않는 경로의 404는 기록되지 않는다.
+- **느린 쿼리 로그**: `SLOW_QUERY_MS` 이상 걸린 쿼리를 `[SLOW QUERY] 312ms SELECT ...` 로 `warn` 출력한다. 쿼리는 `$1` 같은 자리표시자 형태이며 파라미터 값은 남기지 않는다.
+- Authorization 헤더, 요청 body, 쿼리스트링은 로그에 남기지 않는다.
