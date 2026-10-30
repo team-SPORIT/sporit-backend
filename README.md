@@ -8,6 +8,7 @@
 | 변수 | 설명 |
 | --- | --- |
 | `DATABASE_URL` | Railway PostgreSQL 연결 주소. **배포 서버는 Railway 내부 주소**(`*.railway.internal`), **로컬은 외부(public) 주소**(`*.proxy.rlwy.net`)를 사용한다. 내부 주소는 Railway 네트워크 안에서만 접속된다 |
+| `DB_POOL_IDLE_MS`, `DB_POOL_MAX` | (선택) DB 커넥션 풀 설정. 놀고 있는 연결을 닫기까지의 시간(ms, 기본 `300000`=5분)과 최대 연결 수(기본 `10`). 풀은 keep-alive를 켜고 최소 1개 연결을 유지해, 요청이 뜸할 때 첫 요청이 재연결 때문에 느려지는 것을 줄인다 |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | 인증(Auth)은 계속 Supabase를 사용한다 |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | 이미지 저장소(Railway Buckets, S3 호환, 비공개 버킷). `S3_REGION`은 `auto` |
 | `S3_URL_EXPIRES_SEC` | (선택) 이미지 presigned URL 만료 시간(초). 기본 `3600` |
