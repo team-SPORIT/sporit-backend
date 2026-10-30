@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { TimingInterceptor } from './common/interceptors/timing.interceptor';
 import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './common/supabase/supabase.module';
 import { StorageModule } from './common/storage/storage.module';
@@ -36,6 +38,10 @@ import { CalendarModule } from './modules/calendar/calendar.module';
     CalendarModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // 모든 요청의 응답 시간 로그 (전역 적용)
+    { provide: APP_INTERCEPTOR, useClass: TimingInterceptor },
+  ],
 })
 export class AppModule {}
