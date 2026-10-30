@@ -10,7 +10,11 @@ export class UpdateProfileDto {
   @MaxLength(50)
   nickname?: string;
 
-  @ApiPropertyOptional({ description: '프로필 이미지 URL', maxLength: 500 })
+  @ApiPropertyOptional({
+    description:
+      '프로필 이미지 외부 URL(http/https)만 저장된다. 이미지 파일은 POST /profiles/me/avatar 로 올리며, 응답으로 받은 임시 URL(만료됨)을 다시 보내도 무시된다',
+    maxLength: 500,
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)

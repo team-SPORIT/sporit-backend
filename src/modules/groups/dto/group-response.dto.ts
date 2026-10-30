@@ -74,7 +74,8 @@ export class GroupMemberDto {
   joined_at: Date;
 
   @ApiProperty({
-    description: '멤버 프로필 (닉네임/프로필 이미지)',
+    description:
+      '멤버 프로필 (닉네임/프로필 이미지). 업로드한 프로필 이미지는 만료되는 임시 URL이다(기본 1시간)',
     example: { nickname: '닉네임', profile_image: null },
   })
   profiles: { nickname: string; profile_image: string | null };

@@ -55,7 +55,11 @@ export class RecordsController {
     ]),
   )
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: '운동 기록 작성' })
+  @ApiOperation({
+    summary: '운동 기록 작성',
+    description:
+      '응답의 start_image_url/end_image_url은 만료되는 임시 URL이다(기본 1시간). 만료되면 기록을 다시 조회해 새 URL을 받는다.',
+  })
   @ApiCreatedResponse({ type: RecordResponseDto })
   @ApiNotFoundResponse({ description: '종목을 찾을 수 없음' })
   @ApiForbiddenResponse({ description: '사용할 수 없는 종목' })
@@ -117,7 +121,7 @@ export class RecordsController {
   @ApiOperation({
     summary: '내 최근 7일 기록 조회 (종목별)',
     description:
-      'KST 기준 오늘을 포함한 최근 7일(record_date)의 내 기록을 종목 이름별로 묶어서 내려준다. 같은 이름의 종목은 종목 ID가 달라도 한 종목으로 합산한다. 7일이 지난 기록도 삭제되지 않고 이 조회에서만 제외된다. 시작/종료 사진(startImageUrl, endImageUrl)이 모든 기록에 포함된다.',
+      'KST 기준 오늘을 포함한 최근 7일(record_date)의 내 기록을 종목 이름별로 묶어서 내려준다. 같은 이름의 종목은 종목 ID가 달라도 한 종목으로 합산한다. 7일이 지난 기록도 삭제되지 않고 이 조회에서만 제외된다. 시작/종료 사진(startImageUrl, endImageUrl)이 모든 기록에 포함되며, 만료되는 임시 URL이다(기본 1시간).',
   })
   @ApiQuery({
     name: 'exerciseType',

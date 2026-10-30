@@ -38,7 +38,11 @@ export class ProfilesController {
 
   // 내 프로필 조회
   @Get('me')
-  @ApiOperation({ summary: '내 프로필 조회' })
+  @ApiOperation({
+    summary: '내 프로필 조회',
+    description:
+      '업로드한 프로필 이미지(profile_image)는 만료되는 임시 URL이다(기본 1시간). 저장해 두지 말고 만료되면 다시 조회한다.',
+  })
   findMe(@CurrentUser() user: { id: string; email: string }) {
     return this.profilesService.findMe(user.id);
   }
@@ -57,7 +61,11 @@ export class ProfilesController {
   @Post('me/avatar')
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: '프로필 이미지 업로드' })
+  @ApiOperation({
+    summary: '프로필 이미지 업로드',
+    description:
+      '응답의 profile_image는 만료되는 임시 URL이다(기본 1시간). 만료되면 GET /profiles/me 로 새 URL을 받는다.',
+  })
   @ApiBody({
     schema: {
       type: 'object',
