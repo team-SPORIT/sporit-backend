@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './common/supabase/supabase.module';
+import { StorageModule } from './common/storage/storage.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { ExercisesModule } from './modules/exercises/exercises.module';
@@ -21,6 +22,7 @@ import { CalendarModule } from './modules/calendar/calendar.module';
     ConfigModule.forRoot({ isGlobal: true }), // .env를 전역에서 읽을 수 있게
     PrismaModule,
     SupabaseModule,
+    StorageModule,
     AuthModule,
     ProfilesModule,
     ExercisesModule,
